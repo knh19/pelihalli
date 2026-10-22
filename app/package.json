@@ -1,0 +1,13 @@
+{
+  "name": "pelihalli",
+  "productName": "Pelihalli",
+  "version": "1.0.0",
+  "description": "Pelihalli – pelilauncher, joka päivittää pelit automaattisesti GitHubista",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "manifest": "node tools/make-manifest.js",
+    "build": "electron-packager . Pelihalli --platform=win32 --arch=x64 --out=dist --overwrite --ignore=^/dist --ignore=^/tools --ignore=^/\\.github"
+  },
+  "devDependencies": { "electron": "^33.0.0", "@electron/packager": "^18.3.0" }
+}
