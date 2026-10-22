@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="fi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tukkijätkät</title>
+<link rel="stylesheet" href="../_shared/couch-fonts.css"><link rel="stylesheet" href="../_shared/couchkit.css">
+<style>.ckraft{position:absolute;left:14px;top:130px;width:250px;padding:12px 16px 14px;transform:rotate(-1.2deg)}
+.ckraft h3{font-family:var(--hand);font-size:22px;margin:0 0 2px}.ckraft .hp{font-size:26px;letter-spacing:2px}.ckraft b{font-size:18px}.ckraft small{display:block;font-size:14px;opacity:.85}</style>
+</head><body>
+<script src="../../three.min.js"></script>
+<script src="../_shared/couchkit.js"></script>
+<script>
+'use strict';
+const {clamp,lerp,M}=CK;
+/* ================= pelastettavat ================= */
+const SAVE={
+ kissa:{n:'Kissa laatikossa',v:15,c:0xc8803a},ankat:{n:'Ankanpoikaset',v:10,c:0xf3d23a},poro:{n:'Poronvasa',v:25,c:0x8a6a4a,heavy:true},
+ mummo:{n:'Mummo renkaassa',v:30,c:0xd0a0c0},kala:{n:'Kalalaatikko',v:8,c:0x5a8ab0,fish:true},kitara:{n:'Kitarakotelo',v:12,c:0x2a2a2a},
+ sanko:{n:'Saunakiulu',v:6,c:0x9a6a3a},arkku:{n:'Kalastajan arkku',v:20,c:0x6a4a2a}};
+const SK=Object.keys(SAVE);
+const LEVELS=[
+ {name:'Kotijoki',len:300,time:170,goal:50,rocks:12,whirl:0,rap:0,bear:0,dark:0,items:9},
+ {name:'Kivikkokoski',len:380,time:190,goal:80,rocks:26,whirl:1,rap:1,bear:0,dark:0,items:11},
+ {name:'Pyörrevirta',len:420,time:200,goal:105,rocks:26,whirl:4,rap:1,bear:1,dark:.1,items:12},
+ {name:'Ilmarin joki',len:460,time:210,goal:130,rocks:30,whirl:2,rap:2,bear:3,dark:.2,items:13},
+ {name:'Yökoski',len:460,time:210,goal:140,rocks:32,whirl:3,rap:2,bear:2,dark:.75,items:13},
+ {name:'Suuri koski',len:560,time:240,goal:190,rocks:42,whirl:5,rap:3,bear:3,dark:.25,items:16}];
+const ACH=[
+ {id:'first',n:'Ensimmäinen pelastus',d:'Vie ensimmäinen pelastettava laiturille.',stat:'rescues',goal:1},
+ {id:'r50',n:'Jokipartio',d:'Pelasta 50 kohdetta.',stat:'rescues',goal:50},
+ {id:'r250',n:'Meripelastaja',d:'Pelasta 250 kohdetta.',stat:'rescues',goal:250,tier:'silver'},
+ {id:'r1000',n:'Joen sankarit',d:'Pelasta 1 000 kohdetta.',stat:'rescues',goal:1000,tier:'gold'},
+ {id:'m1k',n:'Tukkipalkka',d:'Ansaitse yhteensä 1 000 €.',stat:'money',goal:1000},
+ {id:'m10k',n:'Uittoyhtiö',d:'Ansaitse yhteensä 10 000 €.',stat:'money',goal:10000,tier:'silver'},
+ {id:'m50k',n:'Jokiparoni',d:'Ansaitse yhteensä 50 000 €.',stat:'money',goal:50000,tier:'gold'},
+ {id:'l1',n:'Kotiranta',d:'Läpäise Kotijoki.'},{id:'l2',n:'Kivien kesyttäjä',d:'Läpäise Kivikkokoski.'},{id:'l3',n:'Pyörteestä pois',d:'Läpäise Pyörrevirta.'},
+ {id:'l4',n:'Karhunkaato',d:'Läpäise Ilmarin joki.',tier:'silver'},{id:'l5',n:'Yölaskija',d:'Läpäise Yökoski.',tier:'silver'},{id:'l6',n:'Suuren kosken legenda',d:'Läpäise Suuri koski.',tier:'gold'},
+ {id:'star3',n:'Kolme tähteä',d:'Saa kolme tähteä mistä tahansa koskesta.',tier:'silver'},{id:'starall',n:'Joen kuninkaat',d:'Saa kolme tähteä jokaisesta koskesta.',tier:'gold'},
+ {id:'mummo',n:'Mummon pelastajat',d:'Pelasta mummo 5 kertaa.',stat:'mummo',goal:5},
+ {id:'kissa',n:'Kissanystävät',d:'Pelasta 10 kissaa.',stat:'kissa',goal:10},
+ {id:'poro',n:'Poropaimen',d:'Pelasta 5 poronvasaa.',stat:'poro',goal:5},
+ {id:'shoo',n:'Karhunkarkottaja',d:'Karkota Ilmari huutamalla 10 kertaa.',stat:'shoo',goal:10},
+ {id:'lunch',n:'Ilmarin lounas',d:'Anna Ilmarin viedä kalalaatikko.'},
+ {id:'swim',n:'Uimakoulu',d:'Putoa jokeen 10 kertaa.',stat:'falls',goal:10},
+ {id:'climb',n:'Takaisin kyytiin',d:'Kiipeä uimasta takaisin lautalle 5 kertaa.',stat:'climbs',goal:5},
+ {id:'intact',n:'Ehjänä perille',d:'Läpäise koski ilman yhtään vauriota.',tier:'silver'},
+ {id:'edge',n:'Rimaa hipoen',d:'Pääse perille viimeisellä hirrellä.'},
+ {id:'full',n:'Täysi lautta',d:'Kuljeta kuutta pelastettavaa yhtä aikaa.'},
+ {id:'speed',n:'Koskenlaskija',d:'Laske yli 7 m/s.'},
+ {id:'spin',n:'Pyörremyrsky',d:'Pyöri lautalla kaksi täyttä kierrosta.'},
+ {id:'coop',n:'Sohva-co-op',d:'Laske koski kahdestaan samalla koneella.',stat:'coop',goal:1},
+ {id:'solo',n:'Yksinmelonta',d:'Läpäise koski yksin.'},
+ {id:'strokes',n:'Melontakäsivarret',d:'Melo 500 vetoa.',stat:'strokes',goal:500},
+ {id:'loud',n:'Kosken kuulutus',d:'Huuda 100 kertaa.',stat:'shouts',goal:100},
+ {id:'dock',n:'Rikas laituri',d:'Toimita yhdellä laiturikäynnillä vähintään 60 €.',tier:'silver'},
+ {id:'close',n:'Täpärästi',d:'Pääse perille, kun aikaa on alle 5 sekuntia.'},
+ {id:'fast',n:'Vauhdikas',d:'Pääse perille, kun aikaa on yli minuutti jäljellä.',tier:'silver'},
+ {id:'all',n:'Tukkijätkien legenda',d:'Avaa kaikki muut saavutukset.',tier:'gold'}];
+const K=CK.create({id:'tukki',title:'Tukkijätkät',kicker:'Uittoyhtiö Virta & Pojat · kesätyö',achKicker:'Uittoyhtiö Virta & Pojat · henkilökortti',nightWord:'Koski',
+  tagline:'Kaksi tukkilaista, yksi hutera lautta. Melokaa alas koskea, pelastakaa jokeen joutuneet ja viekää ne laitureille. Väistäkää kiviä – ja Ilmaria.',
+  pauseTitle:'Evästauko',pauseText:'Ilmari haistaa makkaravoileivät.',
+  help:'Kävele lautan reunalle ja paina tartu-nappia: melot. Vasemmalta meloen lautta kääntyy oikealle ja päinvastoin – melokaa molemmin puolin, niin lautta kulkee suoraan. Kun pelastettava on lähellä reunaa, tartu-nappi nostaa sen kyytiin. Laiturilla lasti vaihtuu rahaksi. Huuda karhulle!',
+  nights:LEVELS,achievements:ACH,onStart:(n,st)=>startLevel(n,st),serialize:()=>serialize(),onMenu:()=>menuScene()});
+
+/* ================= kohtaus ================= */
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x9fc8e0);scene.fog=new THREE.Fog(0x9fc8e0,40,110);
+const camera=new THREE.PerspectiveCamera(44,1,.1,300);K.useScene(scene,camera);
+const hemi=new THREE.HemisphereLight(0xeaf6ff,0x4a6a3a,.85);scene.add(hemi);
+const sun=new THREE.DirectionalLight(0xfff1d6,1.15);sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-22,right:22,top:22,bottom:-22,near:1,far:90});sun.shadow.bias=-.0006;K.shadowLight(sun);scene.add(sun,sun.target);
+function canvasTex(w,h,draw,rep){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);const t=new THREE.CanvasTexture(c);t.encoding=THREE.sRGBEncoding;t.wrapS=t.wrapT=THREE.RepeatWrapping;if(rep)t.repeat.set(rep[0],rep[1]);t.anisotropy=4;return t;}
+const waterTex=canvasTex(256,256,(x,w,h)=>{x.fillStyle='#2f7fa8';x.fillRect(0,0,w,h);for(let i=0;i<70;i++){const y=Math.random()*h,xx=Math.random()*w,l=20+Math.random()*60;x.strokeStyle=`rgba(255,255,255,${.08+Math.random()*.16})`;x.lineWidth=2+Math.random()*2;x.beginPath();x.moveTo(xx,y);x.quadraticCurveTo(xx+6,y+l/2,xx,y+l);x.stroke();}});
+const foamTex=canvasTex(256,256,(x,w,h)=>{x.clearRect(0,0,w,h);for(let i=0;i<160;i++){x.fillStyle=`rgba(255,255,255,${.25+Math.random()*.5})`;x.beginPath();x.ellipse(Math.random()*w,Math.random()*h,3+Math.random()*10,2+Math.random()*4,0,0,7);x.fill();}});
+const grassTex=canvasTex(256,256,(x,w,h)=>{x.fillStyle='#4f8a3a';x.fillRect(0,0,w,h);for(let i=0;i<2200;i++){x.fillStyle=`rgba(${30+Math.random()*60|0},${90+Math.random()*70|0},${30+Math.random()*30|0},.6)`;x.fillRect(Math.random()*w,Math.random()*h,2,3);}});
+const logTex=canvasTex(128,256,(x,w,h)=>{x.fillStyle='#8a5a32';x.fillRect(0,0,w,h);for(let i=0;i<40;i++){x.strokeStyle=`rgba(40,20,5,${.2+Math.random()*.3})`;x.lineWidth=1+Math.random()*2;const xx=Math.random()*w;x.beginPath();x.moveTo(xx,0);x.lineTo(xx+Math.random()*6-3,h);x.stroke();}});
+let world=null;
+/* ================= joen muoto ================= */
+let RV=null;// {s1,s2,s3,len,rap:[[z0,z1]]}
+const cx=z=>6*Math.sin(z*.021+RV.s1)+4*Math.sin(z*.052+RV.s2);
+const hw=z=>{let w=8+2.6*Math.sin(z*.033+RV.s3);for(const d of RV.docks)if(Math.abs(z-d.z)<9)w+=2*(1-Math.abs(z-d.z)/9);return w;};
+const inRap=z=>RV.rap.some(r=>z<r[0]&&z>r[1]);
+const curSpd=z=>{let s=2.1+RV.lv*.12;if(inRap(z))s+=2.6;return s;};
+function tangent(z){const a=cx(z-1),b=cx(z+1);const dx=(a-b)/2;const l=Math.hypot(dx,1);return{x:dx/l,z:-1/l};}// virtaus kohti -z
+function buildRiver(L){if(world){scene.remove(world);world.traverse(o=>{if(o.geometry)o.geometry.dispose();});}world=new THREE.Group();scene.add(world);
+  const N=Math.ceil((L+60)/2),pos=[],uv=[],bpos=[],idx=[],bidx=[];
+  for(let i=0;i<=N;i++){const z=30-i*2,c=cx(z),w=hw(z);pos.push(c-w-.5,0,z,c+w+.5,0,z);uv.push(0,i*2/9,1,i*2/9);
+    const y=.35;bpos.push(c-w-40,y+1.5,z,c-w-1,y,z,c-w+.2,-.6,z,c+w-.2,-.6,z,c+w+1,y,z,c+w+40,y+1.5,z);
+    if(i<N){const a=i*2;idx.push(a,a+1,a+2,a+1,a+3,a+2);const b=i*6;for(const k of[0,1,3,4]){if(k===2)continue;bidx.push(b+k,b+k+6,b+k+1,b+k+1,b+k+6,b+k+7);}}}
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(idx);g.computeVertexNormals();
+  const wm=new THREE.MeshStandardMaterial({color:0xffffff,map:waterTex,roughness:.15,metalness:.1,transparent:true,opacity:.92});const water=new THREE.Mesh(g,wm);water.position.y=0;water.receiveShadow=true;world.add(water);
+  const fm=new THREE.MeshBasicMaterial({map:foamTex,transparent:true,depthWrite:false,opacity:.85});const foam=new THREE.Mesh(g.clone(),fm);foam.position.y=.03;foam.visible=false;world.add(foam);
+  const bg=new THREE.BufferGeometry();bg.setAttribute('position',new THREE.Float32BufferAttribute(bpos,3));const buv=[];for(let i=0;i<bpos.length/3;i++)buv.push(bpos[i*3]/6,bpos[i*3+2]/6);bg.setAttribute('uv',new THREE.Float32BufferAttribute(buv,2));bg.setIndex(bidx);bg.computeVertexNormals();
+  const bank=new THREE.Mesh(bg,M(0xffffff,.95,{map:grassTex,side:THREE.DoubleSide}));bank.receiveShadow=true;world.add(bank);
+  const bed=new THREE.Mesh(new THREE.PlaneGeometry(120,L+120),M(0x26404a,1));bed.rotation.x=-Math.PI/2;bed.position.set(0,-.7,-L/2);world.add(bed);
+  // vaahtoa koskissa
+  for(const r of RV.rap){const zs=r[0],ze=r[1];for(let z=zs;z>ze;z-=3){const fo=new THREE.Mesh(new THREE.PlaneGeometry(hw(z)*1.7,2.6),new THREE.MeshBasicMaterial({map:foamTex,transparent:true,depthWrite:false,opacity:.75}));fo.rotation.x=-Math.PI/2;fo.position.set(cx(z),.04,z);world.add(fo);fo.userData.rap=1;}}
+  // puut
+  const tg=new THREE.ConeGeometry(1.6,4.2,7),tm=M(0x1f4a2a,.95),trunkG=new THREE.CylinderGeometry(.2,.26,1.2,6),trunkM=M(0x5a3a22,.9);
+  const nT=Math.floor(L/4),tI=new THREE.InstancedMesh(tg,tm,nT*2),sI=new THREE.InstancedMesh(trunkG,trunkM,nT*2),mm=new THREE.Matrix4(),q=new THREE.Quaternion(),sc=new THREE.Vector3(),p=new THREE.Vector3();let k=0;
+  for(let i=0;i<nT;i++)for(const side of[-1,1]){const z=20-i*4-Math.random()*3,c=cx(z),w=hw(z);const x=c+side*(w+3+Math.random()*16),s=.7+Math.random()*.8;
+    sc.set(s,s,s);p.set(x,.35+1.5*((Math.abs(x-c)-w)/40)+2.6*s,z);mm.compose(p,q,sc);tI.setMatrixAt(k,mm);p.y-=2.6*s;p.y+=.6*s;mm.compose(p,q,sc);sI.setMatrixAt(k,mm);k++;}
+  tI.castShadow=true;tI.count=k;sI.count=k;world.add(tI,sI);
+  return{water,foam};}
+/* ================= mallit ================= */
+function makeRaft(){const g=new THREE.Group(),m=M(0xffffff,.85,{map:logTex});
+  for(let i=0;i<5;i++){const l=new THREE.Mesh(new THREE.CylinderGeometry(.32,.32,4.2,12),m);l.rotation.x=Math.PI/2;l.position.set(-1.28+i*.64,.12,0);l.castShadow=l.receiveShadow=true;g.add(l);}
+  for(const z of[-1.5,1.5]){const b=new THREE.Mesh(new THREE.BoxGeometry(3.3,.12,.25),M(0x5a3a22,.8));b.position.set(0,.42,z);b.castShadow=true;g.add(b);}
+  const flag=new THREE.Group();const pole=new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,1.8,6),M(0x4a3a2a,.8));pole.position.y=.9;flag.add(pole);const f=new THREE.Mesh(new THREE.PlaneGeometry(.7,.45),M(0xf2c230,.6,{side:THREE.DoubleSide}));f.position.set(.35,1.55,0);flag.add(f);flag.position.set(1.3,.3,1.8);g.add(flag);
+  scene.add(g);return{o:g,x:0,z:0,a:0,vx:0,vz:0,w:0,hp:5,cargo:[],spinAcc:0,flag:f};}
+function makePaddle(){const g=new THREE.Group();const s=new THREE.Mesh(new THREE.CylinderGeometry(.03,.03,1.4,6),M(0x8a5a32,.7));s.position.y=.2;g.add(s);const b=new THREE.Mesh(new THREE.BoxGeometry(.2,.4,.04),M(0xc8803a,.6));b.position.y=-.5;g.add(b);return g;}
+function makePlayer(i,name){const b=CK.blob({color:i?0x5fd6dc:0xf0b47a,belly:i?0xd8fbff:0xfff0d8,hat:i?'beanie':'cap',hatColor:i?0x2f6fd6:0xc0392b,feet:i?0x2a6a7a:0x6a3a1a});b.scale.setScalar(1.2);scene.add(b);
+  const pad=makePaddle();pad.visible=false;b.add(pad);const lab=K.label(name,'cklabel');lab.style.color=i?'#5fe6f0':'#ff9a4a';
+  return{i,o:b,pad,lx:i?.7:-.7,lz:.6,x:0,z:0,vx:0,vz:0,face:0,onRaft:true,swimT:0,cd:0,stroke:0,lab,bubble:null,bubT:0};}
+function saveMesh(k){const s=SAVE[k],g=new THREE.Group(),add=(geo,m,x,y,z,sx,sy,sz)=>{const o=new THREE.Mesh(geo,m);o.position.set(x,y,z);o.scale.set(sx,sy,sz);o.castShadow=true;g.add(o);return o;},B=new THREE.BoxGeometry(1,1,1),S=CK.SPH;
+  switch(k){case'kissa':add(B,M(0xb8925a,.9),0,.2,0,.6,.4,.5);add(S,M(0xf0a030,.6),0,.5,0,.2,.18,.2);for(const q of[-1,1])add(S,M(0xf0a030,.6),q*.1,.66,0,.05,.08,.05);add(S,M(0xffffff,.3),.07,.52,-.17,.04,.04,.03);add(S,M(0xffffff,.3),-.07,.52,-.17,.04,.04,.03);break;
+    case'ankat':for(let i=0;i<3;i++){add(S,M(0xf3d23a,.6),(i-1)*.28,.15,(i%2)*.15,.13,.11,.15);add(S,M(0xf3d23a,.6),(i-1)*.28,.28,(i%2)*.15-.08,.08,.08,.08);add(B,M(0xff8a1a,.5),(i-1)*.28,.27,(i%2)*.15-.17,.06,.03,.06);}break;
+    case'poro':add(S,M(0x8a6a4a,.8),0,.4,0,.25,.25,.45);add(S,M(0x8a6a4a,.8),0,.65,-.42,.14,.15,.17);for(const q of[-1,1]){add(B,M(0x5a4a3a,.8),q*.1,.88,-.4,.03,.2,.03);}for(const[x,z]of[[-.12,-.25],[.12,-.25],[-.12,.25],[.12,.25]])add(B,M(0x5a4a3a,.8),x,.15,z,.06,.3,.06);break;
+    case'mummo':{const t=new THREE.Mesh(new THREE.TorusGeometry(.42,.16,10,20),M(0x222222,.7));t.rotation.x=Math.PI/2;t.position.y=.12;t.castShadow=true;g.add(t);add(S,M(0xd0a0c0,.7),0,.42,0,.25,.3,.24);add(S,M(0xf2d0b0,.6),0,.78,0,.17,.17,.17);add(S,M(0xeeeeee,.9),0,.92,.03,.15,.08,.15);add(S,M(0x111111,.3),.06,.8,-.15,.03,.03,.02);add(S,M(0x111111,.3),-.06,.8,-.15,.03,.03,.02);break;}
+    case'kala':add(B,M(0x5a8ab0,.6),0,.2,0,.7,.35,.5);for(let i=0;i<2;i++)add(S,M(0xb0c8d8,.3),(i-.5)*.3,.42,0,.16,.07,.08);break;
+    case'kitara':add(B,M(0x2a2a2a,.5),0,.12,0,.4,.2,1.1);add(B,M(0xc0c0c0,.3),0,.23,-.2,.1,.02,.1);break;
+    case'sanko':add(new THREE.CylinderGeometry(.22,.17,.36,12),M(0x9a6a3a,.8),0,.18,0,1,1,1);break;
+    case'arkku':add(B,M(0x6a4a2a,.8),0,.22,0,.7,.44,.45);add(B,M(0xd8b040,.3),0,.3,-.23,.12,.12,.03);break;}
+  return g;}
+function makeBear(){const g=new THREE.Group();const fur=M(0x5a3a22,.9),add=(geo,m,x,y,z,sx,sy,sz)=>{const o=new THREE.Mesh(geo,m);o.position.set(x,y,z);o.scale.set(sx,sy,sz);o.castShadow=true;g.add(o);return o;};
+  add(CK.SPH,fur,0,.75,0,.7,.62,.95);add(CK.SPH,fur,0,1.15,-.85,.45,.42,.45);add(CK.SPH,M(0xc8a070,.8),0,1.05,-1.22,.2,.15,.15);add(CK.SPH,M(0x111111,.3),0,1.1,-1.36,.07,.06,.05);
+  for(const s of[-1,1]){add(CK.SPH,fur,s*.32,1.5,-.78,.13,.13,.08);add(CK.SPH,M(0xffffff,.3),s*.17,1.27,-1.18,.07,.08,.04);add(CK.SPH,M(0x111111,.3),s*.17,1.27,-1.22,.035,.045,.02);}
+  const legs=[];for(const[x,z]of[[-.38,-.45],[.38,-.45],[-.38,.45],[.38,.45]])legs.push(add(CK.CYL,fur,x,.25,z,.17,.5,.17));
+  scene.add(g);const lab=K.label('ILMARI','cklabel');lab.style.color='#ffd24a';return{o:g,legs,lab};}
+/* ================= tila ================= */
+let G=null,RVm=null;
+function clearLevel(){if(!G)return;for(const o of G.objs)scene.remove(o);for(const p of G.pl){scene.remove(p.o);p.lab.remove();if(p.bubble)p.bubble.remove();}scene.remove(G.raft.o);
+  for(const it of G.items){scene.remove(it.o);if(it.lab)it.lab.remove();}for(const b of G.bears){scene.remove(b.m.o);b.m.lab.remove();}const n=document.getElementById('ckRaft');if(n)n.remove();G=null;}
+let menuT=0;
+function menuScene(){clearLevel();RV={s1:1.3,s2:.4,s3:2,len:400,rap:[[-60,-110]],docks:[],lv:0};RVm=buildRiver(400);hemi.intensity=.85;sun.intensity=1.15;scene.background.setHex(0x9fc8e0);scene.fog.color.setHex(0x9fc8e0);}
+function startLevel(n,st){clearLevel();const L=LEVELS[n];const seedVal=(st&&st.seed)||(1+Math.floor(Math.random()*1e6));const rng=mulberry(n*977+seedVal);
+  RV={s1:rng()*6,s2:rng()*6,s3:rng()*6,len:L.len,rap:[],docks:[],lv:n};
+  for(let i=0;i<L.rap;i++){const z0=-60-(i+.5)*(L.len-100)/L.rap;RV.rap.push([z0,z0-34]);}
+  const nd=Math.max(2,Math.round(L.len/130));for(let i=1;i<=nd;i++){const z=-i*L.len/nd+(i===nd?0:10);RV.docks.push({z,side:i%2?1:-1,last:i===nd});}
+  RVm=buildRiver(L.len);
+  G={n,L,time:L.time,money:0,pl:[],items:[],objs:[],rocks:[],whirls:[],bears:[],dmg:0,docked:{},finished:false,seed:seedVal};
+  G.raft=makeRaft();G.raft.z=8;G.raft.x=cx(8);
+  for(let i=0;i<K.players;i++)G.pl.push(makePlayer(i,K.names[i]||('P'+(i+1))));
+  if(K.players===1){G.pl[0].lx=0;G.pl[0].lz=.4;}
+  hemi.intensity=.85*(1-L.dark*.75);sun.intensity=1.15*(1-L.dark*.8);const bgc=L.dark>.5?0x182634:0x9fc8e0;scene.background.setHex(bgc);scene.fog.color.setHex(bgc);
+  if(L.dark>.5){const lant=new THREE.PointLight(0xffd8a0,1.6,16,2);lant.position.set(1.3,2.2,1.8);G.raft.o.add(lant);}
+  // laiturit
+  for(const d of RV.docks){const c=cx(d.z),w=hw(d.z),x=c+d.side*(w-1.4);const g=new THREE.Group();const plank=new THREE.Mesh(new THREE.BoxGeometry(3.2,.18,6),M(0x9a6a3a,.85,{map:logTex}));plank.position.y=.35;plank.castShadow=plank.receiveShadow=true;g.add(plank);
+    for(const[a,b]of[[-1.4,-2.8],[1.4,-2.8],[-1.4,2.8],[1.4,2.8]]){const p=new THREE.Mesh(new THREE.CylinderGeometry(.12,.12,1.4,6),M(0x5a3a22,.9));p.position.set(a,0,b);g.add(p);}
+    const sign=new THREE.Mesh(new THREE.PlaneGeometry(3.4,.85),new THREE.MeshBasicMaterial({map:canvasTex(256,64,(x,w,h)=>{x.fillStyle='#f1e2b0';x.fillRect(0,0,w,h);x.fillStyle='#2a1709';x.font='40px "Bowlby One",Impact';x.textAlign='center';x.fillText(d.last?'MAALI':'LAITURI',w/2,46);}),side:THREE.DoubleSide}));
+    sign.position.set(-d.side*.2,1.6,0);sign.rotation.x=-.9;g.add(sign);g.position.set(x,0,d.z);scene.add(g);G.objs.push(g);d.x=x;d.w=4.6;}
+  // kivet
+  const rockG=new THREE.DodecahedronGeometry(1,0),rockM=M(0x7a7f86,.9);
+  for(let i=0;i<L.rocks;i++){const z=-20-rng()*(L.len-40);if(RV.docks.some(d=>Math.abs(d.z-z)<9))continue;const c=cx(z),w=hw(z);const r=.6+rng()*.9;const x=c+(rng()*2-1)*(w-1.2);
+    const m=new THREE.Mesh(rockG,rockM);m.scale.set(r,r*.7,r);m.position.set(x,.1,z);m.rotation.set(rng()*3,rng()*3,rng()*3);m.castShadow=true;scene.add(m);G.objs.push(m);G.rocks.push({x,z,r:r*.95});}
+  // pyörteet
+  const swirl=canvasTex(256,256,(x,w,h)=>{x.clearRect(0,0,w,h);x.translate(w/2,h/2);for(let i=0;i<5;i++){x.rotate(1.256);x.strokeStyle='rgba(255,255,255,.55)';x.lineWidth=6;x.beginPath();for(let t=0;t<60;t++){const a=t*.1,r=t*2;x.lineTo(Math.cos(a)*r,Math.sin(a)*r);}x.stroke();}});
+  for(let i=0;i<L.whirl;i++){const z=-50-rng()*(L.len-90);const x=cx(z)+(rng()*2-1)*(hw(z)-3);const m=new THREE.Mesh(new THREE.CircleGeometry(3,32),new THREE.MeshBasicMaterial({map:swirl,transparent:true,depthWrite:false}));m.rotation.x=-Math.PI/2;m.position.set(x,.05,z);scene.add(m);G.objs.push(m);G.whirls.push({x,z,r:3,m});}
+  // karhut
+  for(let i=0;i<L.bear;i++){const z=-80-(i+.4)*(L.len-120)/Math.max(1,L.bear);const side=i%2?1:-1;const m=makeBear();const bx=cx(z)+side*(hw(z)+2.5);G.bears.push({m,hx:bx,hz:z,x:bx,z,side,st:'wait',t:0,item:null,face:0});}
+  // pelastettavat
+  for(let i=0;i<L.items;i++){const z=-25-(i+.5)*(L.len-60)/L.items+(rng()-.5)*10;const k=i===0?'kala':SK[(rng()*SK.length)|0];spawnSave(k,z,rng);}
+  // HUD
+  document.getElementById('ckHud').insertAdjacentHTML('beforeend','<div class="cknote ckcard ckraft" id="ckRaft"></div>');
+  if(st)restore(st);
+  K.hudSet({night:'KOSKI '+(n+1),time:G.time,money:G.money,goal:L.goal});drawRaftNote();K.msg(L.name.toUpperCase(),2.4);
+  const all=[];G.pl.forEach(p=>{placeOnRaft(p);});}
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function spawnSave(k,z,rng){rng=rng||Math.random;const c=cx(z),w=hw(z);let x=c+(rng()*2-1)*(w-2),stuck=null;
+  if(G.rocks.length&&rng()<.45){let best=null,bd=1e9;for(const r of G.rocks){const d=Math.abs(r.z-z);if(d<bd){bd=d;best=r;}}if(best&&bd<30){x=best.x;z=best.z;stuck=best;}}
+  const o=saveMesh(k);scene.add(o);const lab=K.label(SAVE[k].n+' €'+SAVE[k].v,'ckitem');lab.classList.add('want');
+  const it={k,o,x:stuck?x+stuck.r*.7:x,z:stuck?z:z,y:stuck?.55:0,st:stuck?'stuck':'float',vx:0,vz:0,lab,bob:Math.random()*6,rock:stuck};G.items.push(it);return it;}
+function drawRaftNote(){const el=document.getElementById('ckRaft');if(!el||!G)return;const r=G.raft;const next=RV.docks.find(d=>d.z<r.z-2&&!G.docked[d.z]);
+  el.innerHTML=`<h3>Lautta</h3><div class="hp">${'🪵'.repeat(Math.max(0,r.hp))}${'<span style="opacity:.25">🪵</span>'.repeat(5-Math.max(0,r.hp))}</div><b>Kyydissä ${r.cargo.length} / 6</b><small>${next?(next.last?'Maaliin':'Laiturille')+' '+Math.max(0,Math.round(r.z-next.z))+' m':''}</small>`;}
+/* ================= tallennus ================= */
+function serialize(){if(!G)return null;return{seed:G.seed,time:G.time,money:G.money,z:G.raft.z,hp:G.raft.hp,dmg:G.dmg,docked:G.docked};}
+function restore(s){G.time=s.time;G.money=s.money;G.raft.z=s.z;G.raft.x=cx(s.z);G.raft.hp=s.hp;G.dmg=s.dmg||0;G.docked=s.docked||{};for(const it of G.items.slice())if(it.z>s.z+5){scene.remove(it.o);it.lab.remove();G.items.splice(G.items.indexOf(it),1);}}
+/* ================= apurit ================= */
+const rf=r=>({x:-Math.sin(r.a),z:-Math.cos(r.a)});
+const toW=(r,lx,lz)=>{const ca=Math.cos(r.a),sa=Math.sin(r.a);return{x:r.x+lx*ca+lz*sa,z:r.z-lx*sa+lz*ca};};
+const toL=(r,x,z)=>{const dx=x-r.x,dz=z-r.z,ca=Math.cos(r.a),sa=Math.sin(r.a);return{x:dx*ca-dz*sa,z:dx*sa+dz*ca};};
+function placeOnRaft(p){const w=toW(G.raft,p.lx,p.lz);p.x=w.x;p.z=w.z;}
+function say(p,t){if(!p)return;if(p.bubble)p.bubble.remove();p.bubble=K.label(t,'ckbubble');p.bubT=1.1;}
+const floats=[];function floatText(t,pos,col){const el=K.label(t,'cklabel');el.style.color=col||'#8df0a0';floats.push({el,p:pos.clone(),t:1.3});}
+let shake=0;
+/* ================= päivitys ================= */
+function update(dt,T){const r=G.raft,L=G.L;
+  G.time-=dt;if(G.time<=0){finish(false);return;}
+  const tan=tangent(r.z),cs=curSpd(r.z),wantVx=tan.x*cs,wantVz=tan.z*cs;
+  // pelaajat
+  for(const p of G.pl){const I=K.inp[p.i];p.cd=Math.max(0,p.cd-dt);p.stroke=Math.max(0,p.stroke-dt);p.bubT-=dt;if(p.bubble&&p.bubT<=0){p.bubble.remove();p.bubble=null;}
+    if(I.sp){K.sfx(p.i?'shout2':'shout1');K.stat('shouts');say(p,['HEP!','VARO!','KIVI!','MELO!','ILMARI!'][(Math.random()*5)|0]);for(const b of G.bears)if(Math.hypot(b.x-p.x,b.z-p.z)<9&&b.st!=='wait'&&b.st!=='scared'){b.st='scared';b.t=4;K.stat('shoo');K.sfx('roar');if(b.item){dropFromBear(b);}}}
+    if(p.onRaft){const ca=Math.cos(r.a),sa=Math.sin(r.a);// syöte maailman suunnista lautan omiin
+      const lx=I.x*ca-I.z*sa,lz=I.x*sa+I.z*ca;p.lx=clamp(p.lx+lx*3.4*dt,-1.45,1.45);p.lz=clamp(p.lz+lz*3.4*dt,-1.9,1.9);
+      if(Math.hypot(I.x,I.z)>.1)p.face=Math.atan2(-I.x,-I.z);
+      if(I.gp)raftAction(p);placeOnRaft(p);p.vx=r.vx;p.vz=r.vz;}
+    else{// uinti
+      p.swimT+=dt;p.vx+=(I.x*2.4+wantVx*.85-p.vx)*Math.min(1,dt*3);p.vz+=(I.z*2.4+wantVz*.85-p.vz)*Math.min(1,dt*3);p.x+=p.vx*dt;p.z+=p.vz*dt;
+      const c=cx(p.z),w=hw(p.z);p.x=clamp(p.x,c-w+.4,c+w-.4);if(Math.hypot(I.x,I.z)>.1)p.face=Math.atan2(-I.x,-I.z);
+      const l=toL(r,p.x,p.z);const near=Math.abs(l.x)<2.4&&Math.abs(l.z)<2.8;
+      if(I.gp&&near){p.onRaft=true;p.lx=clamp(l.x,-1.4,1.4);p.lz=clamp(l.z,-1.8,1.8);K.stat('climbs');K.sfx('grab');say(p,'KYYDISSÄ!');}
+      if(p.swimT>8||p.z>r.z+14){p.onRaft=true;p.lx=0;p.lz=1.5;floatText('Pelastettu!',p.o.position,'#fff');}}}
+  // lautan fysiikka
+  const drag=1.1/(1+r.cargo.reduce((a,c)=>a+(SAVE[c.k].heavy?.3:.06),0));
+  r.vx+=(wantVx-r.vx)*Math.min(1,dt*drag);r.vz+=(wantVz-r.vz)*Math.min(1,dt*drag);r.w*=Math.exp(-1.3*dt);
+  // kääntyy hiljalleen virran suuntaan
+  const wantA=Math.atan2(-tan.x,-tan.z);let da=wantA-r.a;while(da>Math.PI)da-=Math.PI*2;while(da<-Math.PI)da+=Math.PI*2;r.w+=da*.35*dt;
+  for(const w of G.whirls){const dx=r.x-w.x,dz=r.z-w.z,d=Math.hypot(dx,dz);if(d<w.r+1.5){r.w+=2.6*dt;r.vx-=dx/d*1.4*dt;r.vz-=dz/d*1.4*dt;}w.m.rotation.z+=dt*2;}
+  r.a+=r.w*dt;r.x+=r.vx*dt;r.z+=r.vz*dt;
+  if(Math.abs(r.w)>1.6){r.spinAcc+=Math.abs(r.w)*dt;if(r.spinAcc>Math.PI*4)K.unlock('spin');}else r.spinAcc=Math.max(0,r.spinAcc-dt*2);
+  if(Math.hypot(r.vx,r.vz)>7)K.unlock('speed');
+  // rannat
+  for(const lz of[-1.5,0,1.5]){const pt=toW(r,0,lz),c=cx(pt.z),w=hw(pt.z)-1.6;const off=pt.x-c;if(Math.abs(off)>w){const pen=Math.abs(off)-w,s=Math.sign(off);r.x-=s*pen;const vn=r.vx*s;if(vn>0){r.vx-=1.5*vn*s;if(vn>2.4)hit(vn*.8);else K.sfx('bump');}}}
+  // kivet
+  for(const k of G.rocks)for(const lz of[-1.3,0,1.3]){const pt=toW(r,0,lz),dx=pt.x-k.x,dz=pt.z-k.z,d=Math.hypot(dx,dz),min=k.r+1.45;if(d<min&&d>0){const nx=dx/d,nz=dz/d;r.x+=nx*(min-d);r.z+=nz*(min-d);
+      const vn=r.vx*nx+r.vz*nz;if(vn<0){r.vx-=1.5*vn*nx;r.vz-=1.5*vn*nz;r.w+=(lz>0?1:-1)*(nx*.8)*Math.min(3,-vn);if(-vn>2.2)hit(-vn);else K.sfx('bump');}}}
+  // pelastettavat
+  for(const it of G.items){it.bob+=dt*2;
+    if(it.st==='float'){const t=tangent(it.z),s=curSpd(it.z)*.8;it.vx+=(t.x*s-it.vx)*dt;it.vz+=(t.z*s-it.vz)*dt;it.x+=it.vx*dt;it.z+=it.vz*dt;const c=cx(it.z),w=hw(it.z)-.8;it.x=clamp(it.x,c-w,c+w);
+      for(const k of G.rocks){const dx=it.x-k.x,dz=it.z-k.z,d=Math.hypot(dx,dz);if(d<k.r+.4&&d>0){it.x=k.x+dx/d*(k.r+.4);it.z=k.z+dz/d*(k.r+.4);}}
+      const l=toL(r,it.x,it.z);if(Math.abs(l.x)<1.7&&Math.abs(l.z)<2.2){it.x=toW(r,Math.sign(l.x||1)*1.9,l.z).x;}
+      it.o.position.set(it.x,.05+Math.sin(it.bob)*.06,it.z);it.o.rotation.y+=dt*.3;
+      if(it.z>r.z+25&&!it.respawned){it.respawned=true;}}
+    else if(it.st==='stuck'){it.o.position.set(it.x,it.y+Math.sin(it.bob*.5)*.02,it.z);}
+    else if(it.st==='cargo'){const i=r.cargo.indexOf(it),lx=((i%2)-.5)*1.4,lz=-1.4+Math.floor(i/2)*1.0,pt=toW(r,lx,lz);it.x=pt.x;it.z=pt.z;it.o.position.set(pt.x,.42,pt.z);it.o.rotation.y=r.a;}
+    else if(it.st==='bear'){}
+    K.place(it.lab,it.o.position,1.1);if(it.st==='cargo'||it.st==='bear')it.lab.style.display='none';
+    if((it.st==='float'||it.st==='stuck')&&Math.abs(it.z-r.z)>45)it.lab.style.display='none';}
+  // laiturit
+  for(const d of RV.docks){if(G.docked[d.z])continue;if(Math.abs(r.z-d.z)<4.2&&Math.abs(r.x-d.x)<4.4){G.docked[d.z]=1;deliver(d);if(d.last){finish(true);return;}}
+    else if(d.last&&r.z<d.z-6){G.docked[d.z]=1;deliver(d);finish(true);return;}}
+  updateBears(dt);
+  K.hudSet({time:G.time,money:G.money,goal:L.goal});if(Math.floor(G.time*2)!==Math.floor((G.time+dt)*2))drawRaftNote();
+  if(G.time<10&&Math.ceil(G.time)!==Math.ceil(G.time+dt))K.sfx('tick');
+  // vaahto koskissa
+  RVm.water.material.map.offset.y+=dt*cs*.11;}
+function raftAction(p){const r=G.raft;
+  // nosta pelastettava
+  let best=null,bd=2.1;for(const it of G.items){if(it.st!=='float'&&it.st!=='stuck')continue;const d=Math.hypot(it.x-p.x,it.z-p.z);if(d<bd){bd=d;best=it;}}
+  if(best){if(r.cargo.length>=6){say(p,'TÄYNNÄ!');return;}best.st='cargo';r.cargo.push(best);K.sfx('grab');say(p,'KYYTIIN!');floatText(SAVE[best.k].n,best.o.position,'#ffd24a');if(r.cargo.length>=6)K.unlock('full');drawRaftNote();return;}
+  // melonta
+  if(p.cd>0)return;const side=Math.abs(p.lx)>.85?Math.sign(p.lx):0,back=p.lz>1.3;
+  if(!side&&!back){say(p,'REUNALLE!');p.cd=.5;return;}
+  const solo=K.players===1,pw=(solo?1.45:1)*(back?1.3:1),f=rf(r);r.vx+=f.x*1.7*pw;r.vz+=f.z*1.7*pw;if(side)r.w+=side*-.55*(solo?1.2:1);
+  p.cd=solo?.24:.32;p.stroke=.35;K.stat('strokes');K.sfx('paddle');const sp=toW(r,side?side*1.9:0,back?2.4:p.lz);splash(sp.x,sp.z);}
+const splashes=[];const splashG=new THREE.SphereGeometry(.12,6,4),splashM=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.8});
+function splash(x,z,n=6){for(let i=0;i<n;i++){const m=new THREE.Mesh(splashG,splashM);m.position.set(x,.1,z);scene.add(m);splashes.push({m,vx:(Math.random()-.5)*2,vy:2+Math.random()*2,vz:(Math.random()-.5)*2,t:.6});}}
+function hit(v){const r=G.raft;r.hp--;G.dmg++;K.sfx('crash');shake=.45;drawRaftNote();K.msg(r.hp>0?'KOLAHDUS!':'LAUTTA HAJOSI!',1.2);splash(r.x,r.z,12);
+  if(r.cargo.length&&v>2.8&&Math.random()<.6){const it=r.cargo.splice((Math.random()*r.cargo.length)|0,1)[0];it.st='float';const pt=toW(r,(Math.random()<.5?-1:1)*2.4,0);it.x=pt.x;it.z=pt.z;it.vx=r.vx;it.vz=r.vz;floatText('Hups! '+SAVE[it.k].n,it.o.position,'#ff9a9a');}
+  for(const p of G.pl){if(p.onRaft&&(Math.abs(p.lx)>1.1||Math.abs(p.lz)>1.6)&&Math.random()<.55&&v>2.8){p.onRaft=false;p.swimT=0;const pt=toW(r,Math.sign(p.lx||1)*2.6,p.lz);p.x=pt.x;p.z=pt.z;K.stat('falls');K.sfx('splash');say(p,'PLUMS!');splash(p.x,p.z,10);}}
+  if(r.hp<=0)setTimeout(()=>{if(G&&K.state==='play')finish(false,true);},700);}
+function deliver(d){const r=G.raft;if(!r.cargo.length){floatText('Tyhjä lautta…',r.o.position,'#fff');return;}let sum=0;
+  for(const it of r.cargo){const v=SAVE[it.k].v;sum+=v;K.stat('rescues');K.stat('money',v);if(it.k==='mummo')K.stat('mummo');if(it.k==='kissa')K.stat('kissa');if(it.k==='poro')K.stat('poro');scene.remove(it.o);it.lab.remove();G.items.splice(G.items.indexOf(it),1);}
+  r.cargo.length=0;G.money+=sum;K.sfx('coin');K.msg((d.last?'MAALI! ':'LAITURI! ')+'+€'+sum,1.8);if(sum>=60)K.unlock('dock');drawRaftNote();}
+function updateBears(dt){const r=G.raft;for(const b of G.bears){b.t-=dt;const fish=r.cargo.find(c=>SAVE[c.k].fish)||null,d=Math.hypot(b.x-r.x,b.z-r.z);let tx=b.hx,tz=b.hz,sp=0;
+  if(b.st==='wait'){if(d<16&&r.cargo.length){b.st='swim';K.sfx('roar');K.msg('ILMARI HAISTOI SAALIIN!',1.5);}}
+  else if(b.st==='swim'){tx=r.x;tz=r.z;sp=3.4+G.n*.15;if(d<2.6){const it=fish||r.cargo[(Math.random()*r.cargo.length)|0];if(it){r.cargo.splice(r.cargo.indexOf(it),1);it.st='bear';b.item=it;if(SAVE[it.k].fish)K.unlock('lunch');K.msg('ILMARI NAPPASI: '+SAVE[it.k].n.toUpperCase(),1.6);drawRaftNote();}b.st='home';}
+    if(!r.cargo.length&&!b.item)b.st='home';if(d>30)b.st='home';}
+  else if(b.st==='home'||b.st==='scared'){sp=b.st==='scared'?4.2:2.6;if(b.st==='scared'){tx=b.x+(b.x-r.x);tz=b.z+(b.z-r.z);if(b.t<=0)b.st='home';}if(Math.hypot(b.x-b.hx,b.z-b.hz)<1&&b.st==='home'){b.st='done';}}
+  if(sp){const dx=tx-b.x,dz=tz-b.z,l=Math.hypot(dx,dz);if(l>.3){b.x+=dx/l*sp*dt;b.z+=dz/l*sp*dt;b.face=Math.atan2(-dx,-dz);}}
+  if(b.item){b.item.o.position.set(b.x-Math.sin(b.face)*1.3,1,b.z-Math.cos(b.face)*1.3);}
+  const inW=Math.abs(b.x-cx(b.z))<hw(b.z);b.m.o.position.set(b.x,inW?-.45:.35,b.z);b.m.o.rotation.y=b.face;const k=sp?1:0;b.m.legs.forEach((L,i)=>L.rotation.x=Math.sin(performance.now()/110+(i%2?Math.PI:0))*.6*k);K.place(b.m.lab,b.m.o.position,2.2);}}
+function dropFromBear(b){const it=b.item;b.item=null;it.st='float';it.x=b.x;it.z=b.z;it.vx=0;it.vz=0;}
+function finish(arrived,broke){if(!G||G.finished)return;G.finished=true;const L=G.L,m=Math.round(G.money);
+  let stars=arrived?(m>=L.goal*1.6?3:m>=L.goal*1.3?2:m>=L.goal?1:0):0;
+  if(stars>0){K.unlock('l'+(G.n+1));if(K.players===1)K.unlock('solo');if(G.dmg===0)K.unlock('intact');if(G.raft.hp===1)K.unlock('edge');if(stars===3)K.unlock('star3');if(G.time<5)K.unlock('close');if(G.time>60)K.unlock('fast');}
+  const rows=[['Ansaittu','€'+m],['Tavoite','€'+L.goal],['Lautan kunto',G.raft.hp+' / 5'],['Aikaa jäljellä',Math.max(0,Math.ceil(G.time))+' s']];
+  K.results({title:broke?'Lautta hajosi!':arrived?(stars?'Perillä!':'Perillä – mutta köyhinä'):'Aika loppui!',stars,score:m,rows,text:broke?'Hirret kelluvat kohti merta. Ehkä ensi kerralla vähemmän kiviä.':arrived?(stars?'Uittoyhtiö maksaa palkan. Ilmari jäi nuolemaan näppejään.':'Pelastakaa enemmän matkalla, niin tähtiä tulee.'):'Lautta ei ehtinyt maaliin ajoissa.'});
+  if(LEVELS.every((_,i)=>K.data.best[i]&&K.data.best[i].stars===3))K.unlock('starall');clearLevel();}
+/* ================= silmukka ================= */
+const camT=new THREE.Vector3(0,0,0);
+K.loop((dt,rdt,T)=>{
+  if(G&&K.state==='play')update(dt,T);
+  for(let i=splashes.length-1;i>=0;i--){const s=splashes[i];s.t-=rdt;s.vy-=9*rdt;s.m.position.x+=s.vx*rdt;s.m.position.y+=s.vy*rdt;s.m.position.z+=s.vz*rdt;if(s.t<=0||s.m.position.y<0){scene.remove(s.m);splashes.splice(i,1);}}
+  for(let i=floats.length-1;i>=0;i--){const f=floats[i];f.t-=rdt;f.p.y+=rdt*1.2;K.place(f.el,f.p,0);f.el.style.opacity=Math.min(1,f.t*2);if(f.t<=0){f.el.remove();floats.splice(i,1);}}
+  if(G){const r=G.raft,bob=Math.sin(T*2.2)*.05;r.o.position.set(r.x,bob,r.z);r.o.rotation.set(Math.sin(T*1.7)*.03,r.a,Math.sin(T*1.3)*.03);r.flag.rotation.y=Math.sin(T*4)*.3;
+    for(const p of G.pl){p.o.position.set(p.x,p.onRaft?.38+bob:-.35,p.z);p.o.rotation.y=p.face;CK.animBlob(p.o,rdt*(K.state==='play'?1:0),p.onRaft?Math.hypot(K.inp[p.i].x,K.inp[p.i].z)*3:2,false);
+      p.pad.visible=p.stroke>0||(p.onRaft&&Math.abs(p.lx)>.85);if(p.pad.visible){const sd=p.lx>0?1:-1;p.pad.position.set(.45,.55,-.1);p.pad.rotation.set(-(p.stroke>0?Math.sin((1-p.stroke/.35)*Math.PI)*1.2:.2),0,.5);}
+      K.place(p.lab,p.o.position,1.7);if(p.bubble)K.place(p.bubble,p.o.position,2.3);}
+    camT.x=lerp(camT.x,r.x,Math.min(1,rdt*3));camT.z=lerp(camT.z,r.z-1.2,Math.min(1,rdt*3));
+    sun.position.set(camT.x-14,32,camT.z+16);sun.target.position.set(camT.x,0,camT.z);}
+  else{menuT+=rdt;camT.x=cx(-menuT*3)||0;camT.z=-menuT*3%300;sun.position.set(camT.x-14,32,camT.z+16);sun.target.position.set(camT.x,0,camT.z);if(RVm)RVm.water.material.map.offset.y+=rdt*.25;}
+  shake=Math.max(0,shake-rdt);const sx=(Math.random()-.5)*shake*.7;
+  camera.position.set(camT.x+sx,G?13:20,camT.z+(G?9.5:14));camera.lookAt(camT.x,0,camT.z-1.2);
+});
+menuScene();K.menu();
+</script>
+</body></html>

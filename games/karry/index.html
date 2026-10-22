@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="fi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kärrykaverit</title>
+<link rel="stylesheet" href="../_shared/couch-fonts.css"><link rel="stylesheet" href="../_shared/couchkit.css">
+<style>.cklist{position:absolute;left:14px;top:130px;width:250px;padding:12px 16px 14px;transform:rotate(-1.2deg)}
+.cklist h3{font-family:var(--hand);font-size:22px;margin:0 0 4px}.cklist li{font-weight:800;font-size:17px;list-style:none}.cklist li.done{text-decoration:line-through;opacity:.5}.cklist ul{margin:0;padding:0}
+.cklist small{font-size:14px;opacity:.8}</style>
+</head><body>
+<script src="../../three.min.js"></script>
+<script src="../_shared/couchkit.js"></script>
+<script>
+'use strict';
+const {clamp,lerp,M}=CK;
+/* ================= tuotteet ================= */
+const PROD={
+ banaani:{n:'Banaanit',v:3,c:0xf3d23a,shape:'banana'}, maito:{n:'Maito',v:2,c:0xf4f4f0,shape:'carton',c2:0x2f6fd6}, leipa:{n:'Ruisleipä',v:4,c:0x6b4423,shape:'loaf'},
+ kahvi:{n:'Kahvi',v:7,c:0xc0392b,shape:'bag'}, juusto:{n:'Juusto',v:8,c:0xf2c14e,shape:'wedge'}, karkki:{n:'Karkkipussi',v:3,c:0xff5fa2,shape:'bag'},
+ pizza:{n:'Pakastepizza',v:6,c:0xe74c3c,shape:'flat'}, munat:{n:'Munat',v:5,c:0xd8c3a5,shape:'eggs',fragile:true}, meloni:{n:'Vesimeloni',v:12,c:0x2e8b3a,shape:'melon',heavy:true},
+ kurkku:{n:'Kurkku',v:2,c:0x3f9b3a,shape:'cuke'}, jaatelo:{n:'Jäätelö',v:6,c:0x9fd8ff,shape:'tub'}, salmiakki:{n:'Salmiakki',v:4,c:0x1a1a1a,shape:'bag'},
+ limsa:{n:'Limsa',v:3,c:0xff8a1a,shape:'bottle'}, paperi:{n:'Vessapaperi',v:6,c:0xf7f7f7,shape:'rolls'}, kala:{n:'Lohifilee',v:11,c:0xff8a6a,shape:'flat'}};
+const PK=Object.keys(PROD);
+/* ================= yöt ================= */
+const NIGHTS=[
+ {name:'Hiljainen ilta',goal:40,time:170,spills:1,cans:1,dog:0,cust:0,dark:0,items:16},
+ {name:'Tarjouspäivä',goal:70,time:180,spills:2,cans:2,dog:.8,cust:0,dark:.15,items:20},
+ {name:'Myöhäinen vuoro',goal:100,time:180,spills:3,cans:3,dog:1,cust:1,dark:.35,items:22},
+ {name:'Inventaario',goal:130,time:190,spills:3,cans:4,dog:1.05,cust:3,dark:.3,items:24},
+ {name:'Sähkökatko',goal:150,time:190,spills:4,cans:4,dog:1.12,cust:2,dark:.7,items:24},
+ {name:'Joulusesonki',goal:190,time:200,spills:5,cans:5,dog:1.2,cust:4,dark:.2,items:28,xmas:true}];
+/* ================= saavutukset ================= */
+const ACH=[
+ {id:'first',n:'Ensimmäinen ostos',d:'Vie ensimmäinen tuote kassalle.',stat:'items',goal:1},
+ {id:'i50',n:'Kauppakassi täyttyy',d:'Vie 50 tuotetta kassalle.',stat:'items',goal:50},
+ {id:'i250',n:'Ammattishoppaaja',d:'Vie 250 tuotetta kassalle.',stat:'items',goal:250,tier:'silver'},
+ {id:'i1000',n:'Kärrylegenda',d:'Vie 1 000 tuotetta kassalle.',stat:'items',goal:1000,tier:'gold'},
+ {id:'m1k',n:'Ensimmäinen palkka',d:'Kassaa yhteensä 1 000 €.',stat:'money',goal:1000},
+ {id:'m10k',n:'Kauppias',d:'Kassaa yhteensä 10 000 €.',stat:'money',goal:10000,tier:'silver'},
+ {id:'m50k',n:'Kauppaketjun omistaja',d:'Kassaa yhteensä 50 000 €.',stat:'money',goal:50000,tier:'gold'},
+ {id:'n1',n:'Eka vuoro',d:'Läpäise yö 1.'},{id:'n2',n:'Tarjoushaukka',d:'Läpäise yö 2.'},{id:'n3',n:'Yökyöpeli',d:'Läpäise yö 3.'},
+ {id:'n4',n:'Inventoija',d:'Läpäise yö 4.',tier:'silver'},{id:'n5',n:'Pimeässä näkijä',d:'Läpäise yö 5.',tier:'silver'},{id:'n6',n:'Joulupukin apurit',d:'Läpäise yö 6.',tier:'gold'},
+ {id:'star3',n:'Kolme tähteä',d:'Saa kolme tähteä mistä tahansa yöstä.',tier:'silver'},
+ {id:'starall',n:'Täydellinen työntekijä',d:'Saa kolme tähteä jokaisesta yöstä.',tier:'gold'},
+ {id:'list',n:'Mummon suosikki',d:'Vie 10 tuotetta mummon listalta.',stat:'list',goal:10},
+ {id:'eggs',n:'Varovaiset kädet',d:'Vie 20 munakennoa ehjänä kassalle.',stat:'eggs',goal:20},
+ {id:'melon',n:'Melonimies',d:'Vie 10 vesimelonia kassalle.',stat:'melons',goal:10},
+ {id:'shoo',n:'Koirakuiskaaja',d:'Hätistä Musti huutamalla 10 kertaa.',stat:'shoo',goal:10},
+ {id:'catch',n:'Musti kiinni!',d:'Ota Musti kiinni 5 kertaa.',stat:'dogcatch',goal:5},
+ {id:'slip',n:'Liukastelija',d:'Liukastu märällä lattialla 25 kertaa.',stat:'slips',goal:25},
+ {id:'cans',n:'Keilaaja',d:'Kaada 10 tölkkipyramidia.',stat:'cans',goal:10},
+ {id:'throw',n:'Koriin!',d:'Heitä tuote kärryyn yli neljän metrin päästä.'},
+ {id:'throw25',n:'Koripalloilija',d:'Heitä 25 tuotetta kärryyn.',stat:'throws',goal:25,tier:'silver'},
+ {id:'full',n:'Täysi kärry',d:'Lastaa kärryyn 8 tuotetta yhtä aikaa.'},
+ {id:'rally',n:'Kärryralli',d:'Aja kärryllä yli 7 m/s.'},
+ {id:'spin',n:'Piruetti',d:'Pyöräytä kärryä kaksi täyttä kierrosta putkeen.'},
+ {id:'coop',n:'Sohva-co-op',d:'Pelaa yö kahdestaan samalla koneella.',stat:'coop',goal:1},
+ {id:'solo',n:'Yksinäinen susi',d:'Läpäise yö yksin.'},
+ {id:'late',n:'Viime tingassa',d:'Tee ostos kassalla, kun aikaa on alle 3 sekuntia.'},
+ {id:'early',n:'Etuajassa',d:'Saavuta yön tavoite, kun aikaa on yli minuutti jäljellä.',tier:'silver'},
+ {id:'careful',n:'Varovainen kuski',d:'Läpäise yö ilman yhtään törmäystä.',tier:'silver'},
+ {id:'loud',n:'Äänekäs',d:'Huuda 100 kertaa.',stat:'shouts',goal:100},
+ {id:'oops',n:'Hups',d:'Riko 10 munakennoa.',stat:'broken',goal:10},
+ {id:'big',n:'Iso ostos',d:'Kassaa yhdellä kertaa vähintään 60 €.',tier:'silver'},
+ {id:'all',n:'Kaupan legenda',d:'Avaa kaikki muut saavutukset.',tier:'gold'}];
+
+const K=CK.create({id:'karry',title:'Kärrykaverit',kicker:'Lähikauppa Ruusu · yövuoro',achKicker:'Lähikauppa Ruusu · työntekijäkansio',nightWord:'Yö',
+  tagline:'Kaksi kaveria, yksi heiluva ostoskärry. Kerätkää tavarat kärryyn ja ajakaa kassalle ennen sulkemisaikaa. Varokaa märkiä lattioita – ja Mustia.',
+  pauseTitle:'Kahvitauko',pauseText:'Musti odottaa kiltisti. Ehkä.',
+  help:'Tarttukaa kärryn kahvaan (tartu-nappi kärryn takana) ja työntäkää yhdessä – jos vain toinen työntää, kärry kääntyy. Päästä irti, nouda tuote hyllyltä ja pudota se kärryyn tai heitä kauempaa. Kärry kassalle = rahaa. Mummon listan tuotteet tuplana. Huuda Mustille!',
+  nights:NIGHTS,achievements:ACH,
+  onStart:(n,st)=>startNight(n,st),serialize:()=>serialize(),onMenu:()=>menuScene()});
+
+/* ================= kohtaus ================= */
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x1a1d24);scene.fog=new THREE.Fog(0x1a1d24,40,90);
+const camera=new THREE.PerspectiveCamera(42,1,.1,200);K.useScene(scene,camera);
+const hemi=new THREE.HemisphereLight(0xfff4e6,0x5a4a3a,.75);scene.add(hemi);
+const sun=new THREE.DirectionalLight(0xfff1dd,1.05);sun.position.set(-12,30,14);sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-26,right:26,top:20,bottom:-20,near:1,far:80});sun.shadow.bias=-.0006;K.shadowLight(sun);scene.add(sun);
+const W=21,D=13.5;
+const world=new THREE.Group();scene.add(world);
+const solids=[];// {x0,x1,z0,z1,kind}
+function box(w,h,d,mat,x,y,z,solid,kind){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.castShadow=m.receiveShadow=true;world.add(m);if(solid)solids.push({x0:x-w/2,x1:x+w/2,z0:z-d/2,z1:z+d/2,kind:kind||'wall'});return m;}
+function canvasTex(w,h,draw){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);const t=new THREE.CanvasTexture(c);t.encoding=THREE.sRGBEncoding;t.anisotropy=4;return t;}
+const floorTex=canvasTex(512,512,(x,w,h)=>{x.fillStyle='#7c6f66';x.fillRect(0,0,w,h);for(let i=0;i<8;i++)for(let j=0;j<8;j++){const v=((i+j)%2)?14:0;x.fillStyle=`rgb(${120+v},${110+v},${102+v})`;x.fillRect(i*64+1,j*64+1,62,62);}
+  for(let i=0;i<1600;i++){x.fillStyle=`rgba(0,0,0,${Math.random()*.06})`;x.fillRect(Math.random()*w,Math.random()*h,2,2);}});
+floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping;floorTex.repeat.set(W*2/4,D*2/4);
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(W*2,D*2),M(0xffffff,.85,{map:floorTex}));floor.rotation.x=-Math.PI/2;floor.receiveShadow=true;world.add(floor);
+const outside=new THREE.Mesh(new THREE.PlaneGeometry(140,100),M(0x24382c,.95));outside.rotation.x=-Math.PI/2;outside.position.y=-.02;world.add(outside);
+const wallM=M(0x8f86a8,.8),wallTop=M(0x6c6488,.8);
+box(W*2+1,2.2,.5,wallM,0,1.1,-D-.25,true);box(.5,2.2,D*2,wallM,-W-.25,1.1,0,true);box(.5,2.2,D*2,wallM,W+.25,1.1,0,true);
+box(W*2-14,1,.5,wallM,7,.5,D+.25,true);box(4,1,.5,wallM,-W+2,.5,D+.25,true);// etuseinä: oviaukko vasemmalla
+function floorText(t,x,z,s=1,rot=0){const tx=canvasTex(512,128,(c,w,h)=>{c.clearRect(0,0,w,h);c.font='72px "Bowlby One", Impact';c.textAlign='center';c.textBaseline='middle';c.fillStyle='rgba(255,255,255,.22)';c.fillText(t,w/2,h/2);});
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(6*s,1.5*s),new THREE.MeshBasicMaterial({map:tx,transparent:true,depthWrite:false}));m.rotation.x=-Math.PI/2;m.rotation.z=rot;m.position.set(x,.02,z);world.add(m);}
+/* kassa */
+const KASSA={x0:-W+.5,x1:-W+8.5,z0:D-6,z1:D-.3};
+{const t=canvasTex(256,256,(c,w,h)=>{c.fillStyle='#3a7a4a';c.fillRect(0,0,w,h);c.strokeStyle='rgba(255,255,255,.5)';c.lineWidth=10;c.setLineDash([26,18]);c.strokeRect(12,12,w-24,h-24);});
+ const z=new THREE.Mesh(new THREE.PlaneGeometry(KASSA.x1-KASSA.x0,KASSA.z1-KASSA.z0),M(0xffffff,.9,{map:t}));z.rotation.x=-Math.PI/2;z.position.set((KASSA.x0+KASSA.x1)/2,.015,(KASSA.z0+KASSA.z1)/2);z.receiveShadow=true;world.add(z);
+ floorText('KASSA',(KASSA.x0+KASSA.x1)/2,(KASSA.z0+KASSA.z1)/2,1.1);
+ box(1.2,1,4.5,M(0x3a3f4a,.5),KASSA.x0+1.2,.5,KASSA.z0+.6,true);box(1.1,.06,4.2,M(0x1a1a1a,.4),KASSA.x0+1.2,1.03,KASSA.z0+.6);
+ box(.6,.5,.5,M(0xdedede,.4),KASSA.x0+1.2,1.3,KASSA.z0-1.2);}
+const registerPos=new THREE.Vector3(KASSA.x0+1.2,1.2,KASSA.z0-1);
+/* hyllyt */
+const SHELF_X=[-12,-6.5,-1,4.5,10],SHELF_Z0=-9,SHELF_Z1=3.5;
+const shelfM=M(0xe7e2d8,.6),shelfE=M(0x6c6488,.7);
+const spots=[];// tuotepaikat
+const decoCols=[0xe74c3c,0xf1c40f,0x3498db,0x2ecc71,0x9b59b6,0xe67e22,0xecf0f1,0x1abc9c];
+const decoGeo=new THREE.BoxGeometry(.22,.3,.18);const decoMat=new THREE.MeshStandardMaterial({roughness:.6});
+const decoN=SHELF_X.length*2*4*16;const deco=new THREE.InstancedMesh(decoGeo,decoMat,decoN);let di=0;const dm=new THREE.Matrix4(),dc=new THREE.Color();
+for(const sx of SHELF_X){const len=SHELF_Z1-SHELF_Z0,cz=(SHELF_Z0+SHELF_Z1)/2;box(1.3,1.7,len,shelfM,sx,.85,cz,true,'shelf');
+  for(const y of[.35,.85,1.35])box(1.22,.05,len,shelfM,sx,y,cz);box(.5,.12,len,shelfE,sx,1.76,cz);
+  for(const s of[-1,1])for(const y of[.5,1,1.5,1.98])for(let k=0;k<16;k++){if(Math.random()<.22)continue;const z=SHELF_Z0+.4+k*(len-.8)/15;dm.makeTranslation(sx+s*(y>1.9?.36:.52),y-.02,z);deco.setMatrixAt(di,dm);deco.setColorAt(di,dc.setHex(decoCols[(Math.random()*decoCols.length)|0]));di++;}
+  for(const s of[-1,1])for(let k=0;k<6;k++)spots.push({x:sx+s*.95,z:SHELF_Z0+1+k*(len-2)/5,y:.9,side:s,item:null});}
+deco.count=di;deco.castShadow=true;deco.receiveShadow=true;world.add(deco);
+/* takaseinän pakastimet + hedelmälaatikot */
+for(let i=0;i<6;i++){box(3.4,1.2,1.2,M(0xdfe8ee,.3),-15+i*5.4,.6,-D+.9,true,'shelf');const g=new THREE.Mesh(new THREE.BoxGeometry(3.2,.05,1),new THREE.MeshStandardMaterial({color:0x9fd8ff,transparent:true,opacity:.5,roughness:.05}));g.position.set(-15+i*5.4,1.22,-D+.9);world.add(g);
+  spots.push({x:-15+i*5.4-.8,z:-D+2,y:1,side:1,item:null});spots.push({x:-15+i*5.4+.8,z:-D+2,y:1,side:1,item:null});}
+for(let i=0;i<3;i++){box(2,.7,1.4,M(0x9a6a3a,.8),16+((i%2)*.3),.35,-4+i*3.2,true,'shelf');spots.push({x:14.4,z:-4+i*3.2,y:.8,side:-1,item:null});}
+floorText('PAKASTEET',-3,-D+3.4,1);floorText('HEDELMÄT',16.5,-7.2,.8,Math.PI/2);floorText('LEIPÄ & MAITO',-9.2,-3,.75,Math.PI/2);floorText('HERKUT',1.8,-3,.75,Math.PI/2);floorText('SISÄÄN',-W+6,D+1.6,.7);
+/* kattovalot */
+const lampM=new THREE.MeshBasicMaterial({color:0xfff6e0});for(let i=-2;i<=2;i++)for(let j=-1;j<=1;j++){const l=new THREE.Mesh(new THREE.BoxGeometry(2.6,.06,.4),lampM);l.position.set(i*8,4.2,j*8);world.add(l);}
+const outsideTrees=[];for(let i=0;i<14;i++){const tr=new THREE.Group();const t=new THREE.Mesh(new THREE.ConeGeometry(1.4,3.2,8),M(0x3f7a5a,.9));t.position.y=2;t.castShadow=true;tr.add(t);const s=new THREE.Mesh(new THREE.CylinderGeometry(.18,.22,.8,6),M(0x6b4a2e,.9));s.position.y=.4;tr.add(s);
+  tr.position.set(i<7?-W-4-Math.random()*6:W+4+Math.random()*6,0,-D+i%7*4.4);tr.scale.setScalar(.8+Math.random()*.5);world.add(tr);}
+/* ================= tuotemallit ================= */
+function prodMesh(k){const p=PROD[k],g=new THREE.Group();const m=M(p.c,.55),add=(geo,mat,x,y,z,sx,sy,sz,rx)=>{const o=new THREE.Mesh(geo,mat);o.position.set(x,y,z);o.scale.set(sx,sy,sz);if(rx)o.rotation.x=rx;o.castShadow=true;g.add(o);return o;};
+  const B=new THREE.BoxGeometry(1,1,1),S=CK.SPH,C=CK.CYL;
+  switch(p.shape){case'banana':for(let i=0;i<3;i++){const b=add(C,m,(i-1)*.07,.12,0,.05,.4,.05);b.rotation.z=.9+i*.15;b.rotation.x=.4;}break;
+    case'carton':add(B,m,0,.22,0,.2,.42,.2);add(B,M(p.c2,.5),0,.2,-.101,.18,.2,.01);break;case'loaf':add(S,m,0,.13,0,.26,.13,.15);break;
+    case'bag':add(B,m,0,.2,0,.26,.38,.12);add(B,M(0xffffff,.5),0,.22,-.061,.16,.12,.01);break;case'wedge':{const w=add(new THREE.CylinderGeometry(1,1,1,3),m,0,.1,0,.22,.18,.22);w.rotation.y=.4;}break;
+    case'flat':add(B,m,0,.05,0,.42,.08,.42);add(B,M(0xffffff,.5),0,.095,0,.3,.01,.18);break;case'eggs':add(B,m,0,.06,0,.36,.1,.22);for(let i=0;i<3;i++)for(let j=0;j<2;j++)add(S,M(0xfff4e0,.4),-.11+i*.11,.13,-.05+j*.1,.05,.06,.05);break;
+    case'melon':add(S,m,0,.32,0,.32,.3,.3);add(S,M(0x1f6a2a,.6),0,.32,0,.325,.29,.18);break;case'cuke':{const c=add(C,m,0,.07,0,.07,.45,.07);c.rotation.z=Math.PI/2;}break;
+    case'tub':add(C,m,0,.12,0,.17,.24,.17);add(C,M(0xffffff,.4),0,.25,0,.18,.03,.18);break;case'bottle':add(C,m,0,.2,0,.08,.36,.08);add(C,M(0x222222,.4),0,.42,0,.03,.08,.03);break;
+    case'rolls':for(let i=0;i<4;i++)add(C,m,(i%2-.5)*.18,.14,((i>>1)-.5)*.18,.09,.28,.09);break;}
+  return g;}
+/* ================= tila ================= */
+let G=null;
+function V(x,z){return new THREE.Vector3(x,0,z);}
+function makePlayer(i,name){const b=CK.blob({color:i?0x5fd6dc:0xf0b47a,belly:i?0xd8fbff:0xfff0d8,hat:i?'ears':'cap',hatColor:0x9a5a2a,feet:i?0x2a6a7a:0x6a3a1a});b.scale.setScalar(1.25);scene.add(b);
+  const lab=K.label(name,'cklabel');lab.style.color=i?'#5fe6f0':'#ff9a4a';return{i,o:b,x:-W+5+i*1.2,z:D-2,vx:0,vz:0,face:Math.PI,hold:null,carry:null,slipT:0,lab,stun:0,bubble:null,bubT:0};}
+function makeCart(){const g=new THREE.Group(),bas=new THREE.Group();g.add(bas);const wire=M(0xc9ccd2,.25,{metalness:.8}),red=M(0xd63a2f,.5);
+  const add=(w,h,d,x,y,z,mm)=>{const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mm||wire);o.position.set(x,y,z);o.castShadow=true;bas.add(o);return o;};
+  add(1.15,.05,1.7,0,.42,0);add(.04,.55,1.7,-.57,.7,0);add(.04,.55,1.7,.57,.7,0);add(1.15,.55,.04,0,.7,-.85);add(1.15,.55,.04,0,.7,.85);
+  for(let i=1;i<6;i++){add(.02,.55,1.7,-.57+i*.19,.7,0).visible=i%2===0;}add(1.25,.07,.07,0,1.05,1.05,red);add(.05,.35,.05,-.55,.88,.95);add(.05,.35,.05,.55,.88,.95);
+  const wh=[];for(const[x,z]of[[-.5,-.7],[.5,-.7],[-.5,.7],[.5,.7]]){const w=new THREE.Mesh(new THREE.CylinderGeometry(.11,.11,.07,12),M(0x222222,.7));w.rotation.z=Math.PI/2;w.position.set(x,.11,z);bas.add(w);wh.push(w);}
+  add(.05,.3,.05,-.5,.27,-.7);add(.05,.3,.05,.5,.27,-.7);add(.05,.3,.05,-.5,.27,.7);add(.05,.3,.05,.5,.27,.7);
+  scene.add(g);return{o:g,x:-W+5,z:D-4,a:0,vx:0,vz:0,w:0,items:[],spin:0,wheels:wh};}
+function makeDog(){const g=new THREE.Group();const fur=M(0x2b2420,.8),add=(geo,mm,x,y,z,sx,sy,sz)=>{const o=new THREE.Mesh(geo,mm);o.position.set(x,y,z);o.scale.set(sx,sy,sz);o.castShadow=true;g.add(o);return o;};
+  add(CK.SPH,fur,0,.38,0,.28,.24,.48);const head=add(CK.SPH,fur,0,.56,-.48,.2,.19,.22);add(CK.SPH,M(0x111,.4),0,.52,-.68,.06,.05,.05);
+  for(const s of[-1,1]){add(CK.SPH,fur,s*.13,.73,-.42,.06,.12,.05);add(CK.SPH,M(0xffffff,.3),s*.08,.6,-.64,.05,.05,.03);}
+  const legs=[];for(const[x,z]of[[-.15,-.28],[.15,-.28],[-.15,.28],[.15,.28]])legs.push(add(CK.CYL,fur,x,.14,z,.06,.28,.06));
+  const tail=add(CK.CYL,fur,0,.55,.5,.04,.32,.04);tail.rotation.x=.8;add(CK.CYL,M(0xc0392b,.6),0,.5,-.36,.17,.05,.17);
+  scene.add(g);const lab=K.label('MUSTI','cklabel');lab.style.color='#ffd24a';lab.style.fontSize='14px';
+  return{o:g,x:W-3,z:-D+3,vx:0,vz:0,face:0,st:'wander',t:2,tx:0,tz:0,item:null,legs,tail,lab,dizzy:0,spd:3.6};}
+function makeCust(){const b=CK.blob({color:[0xc9a0dc,0xa0c4dc,0xdcc9a0,0xdca0a0][(Math.random()*4)|0],hat:Math.random()<.5?'beanie':'none',hatColor:0x2f6fd6});b.scale.setScalar(1.05);scene.add(b);
+  return{o:b,x:SHELF_X[(Math.random()*4)|0]+2.7,z:-6+Math.random()*8,vx:0,vz:0,face:0,t:0,tx:0,tz:0};}
+function clearLevel(){if(!G)return;for(const o of G.objs)scene.remove(o);for(const p of G.pl){scene.remove(p.o);p.lab.remove();if(p.bubble)p.bubble.remove();}scene.remove(G.cart.o);if(G.dog){scene.remove(G.dog.o);G.dog.lab.remove();}
+  for(const c of G.cust)scene.remove(c.o);for(const it of G.items){scene.remove(it.o);if(it.lab)it.lab.remove();}for(const s of spots)s.item=null;const l=document.querySelector('.cklist');if(l)l.remove();G=null;}
+function menuScene(){clearLevel();G=null;camT.set(0,0,0);}
+function startNight(n,st){clearLevel();const N=NIGHTS[n];
+  G={n,N,time:N.time,money:0,pl:[],items:[],objs:[],spills:[],cans:[],cust:[],dog:null,crashes:0,list:[],listDone:[],goalHit:false,delivering:[],delT:0,checkSum:0};
+  for(let i=0;i<K.players;i++)G.pl.push(makePlayer(i,K.names[i]||('P'+(i+1))));
+  G.cart=makeCart();
+  hemi.intensity=.75*(1-N.dark*.6);sun.intensity=1.05*(1-N.dark*.7);scene.background.setHex(N.dark>.5?0x0b0d12:0x1a1d24);
+  if(N.dark>.5){for(const p of G.pl){const L=new THREE.PointLight(0xfff0d0,1.3,9,2);L.position.y=1.6;p.o.add(L);}}
+  // tuotteet
+  for(let i=0;i<N.items;i++)spawnItem();
+  // vaarat
+  const free=()=>{for(let t=0;t<50;t++){const x=lerp(-W+3,W-3,Math.random()),z=lerp(-D+3,D-3,Math.random());if(!hitSolid(x,z,1.2)&&!(x<KASSA.x1+1&&z>KASSA.z0-1))return{x,z};}return{x:0,z:5};};
+  for(let i=0;i<N.spills;i++){const p=free(),r=.9+Math.random()*.6;const m=new THREE.Mesh(new THREE.CircleGeometry(r,24),new THREE.MeshStandardMaterial({color:0x9fd8ff,roughness:.02,metalness:.2,transparent:true,opacity:.55}));m.rotation.x=-Math.PI/2;m.position.set(p.x,.025,p.z);scene.add(m);G.objs.push(m);
+    const sign=new THREE.Group();const s1=new THREE.Mesh(new THREE.ConeGeometry(.25,.6,4),M(0xf2c230,.5));s1.position.y=.3;sign.add(s1);sign.position.set(p.x+r+.2,0,p.z);scene.add(sign);G.objs.push(sign);G.spills.push({x:p.x,z:p.z,r});}
+  for(let i=0;i<N.cans;i++){const p=free();const cg=new THREE.Group();const cm=new THREE.InstancedMesh(new THREE.CylinderGeometry(.09,.09,.22,10),M(0xffffff,.35,{metalness:.5}),15);let k=0;const mm=new THREE.Matrix4(),cc=new THREE.Color();
+    for(let row=0;row<5;row++)for(let c=0;c<5-row;c++){if(k>=15)break;mm.makeTranslation((c-(4-row)/2)*.19,.11+row*.22,0);cm.setMatrixAt(k,mm);cm.setColorAt(k,cc.setHex([0xe74c3c,0x3498db,0xf1c40f][(c+row)%3]));k++;}
+    cm.castShadow=true;cg.add(cm);cg.position.set(p.x,0,p.z);scene.add(cg);G.objs.push(cg);G.cans.push({x:p.x,z:p.z,g:cg,down:false,parts:[]});}
+  if(N.dog)G.dog=makeDog(),G.dog.spd*=N.dog;
+  for(let i=0;i<N.cust;i++)G.cust.push(makeCust());
+  // mummon lista
+  newList();
+  document.getElementById('ckHud').insertAdjacentHTML('beforeend','<div class="cknote ckcard cklist" id="ckList"></div>');
+  K.hudSet({night:'YÖ '+(n+1),time:G.time,money:0,goal:N.goal});drawList();
+  if(st)restore(st);
+  K.msg(N.name.toUpperCase(),2.4);}
+function newList(){const have=[...new Set(G.items.filter(i=>i.st==='shelf').map(i=>i.k))];G.list=[];while(G.list.length<3&&have.length){G.list.push(have.splice((Math.random()*have.length)|0,1)[0]);}G.listDone=[];}
+function drawList(){const el=document.getElementById('ckList');if(!el)return;el.innerHTML='<h3>Mummon lista</h3><ul>'+G.list.map(k=>`<li class="${G.listDone.includes(k)?'done':''}">${PROD[k].n}</li>`).join('')+'</ul><small>Listan tuotteet kassalla ×2</small>';}
+function spawnItem(k){const free=spots.filter(s=>!s.item);if(!free.length)return;const s=free[(Math.random()*free.length)|0];k=k||PK[(Math.random()*PK.length)|0];
+  const o=prodMesh(k);o.position.set(s.x,s.y,s.z);o.rotation.y=s.side>0?-Math.PI/2:Math.PI/2;scene.add(o);const it={k,o,st:'shelf',spot:s,x:s.x,z:s.z,y:s.y,vx:0,vy:0,vz:0,lab:null};s.item=it;
+  it.lab=K.label(PROD[k].n+' €'+PROD[k].v,'ckitem');G.items.push(it);return it;}
+function removeItem(it){scene.remove(it.o);if(it.lab)it.lab.remove();if(it.spot)it.spot.item=null;G.items.splice(G.items.indexOf(it),1);}
+/* ================= tallennus ================= */
+function serialize(){if(!G)return null;return{time:G.time,money:G.money,list:G.list,listDone:G.listDone,crashes:G.crashes,cart:G.cart.items.map(i=>i.k)};}
+function restore(s){G.time=s.time;G.money=s.money;G.list=s.list||G.list;G.listDone=s.listDone||[];G.crashes=s.crashes||0;for(const k of s.cart||[]){const it=spawnItem(k);if(it){it.spot.item=null;it.spot=null;putInCart(it,true);}}drawList();K.hudSet({time:G.time,money:G.money,goal:G.N.goal});}
+/* ================= fysiikka-apurit ================= */
+function hitSolid(x,z,r){for(const s of solids)if(x+r>s.x0&&x-r<s.x1&&z+r>s.z0&&z-r<s.z1)return s;return null;}
+function pushOut(o,r){let hit=null;for(const s of solids){if(o.x+r>s.x0&&o.x-r<s.x1&&o.z+r>s.z0&&o.z-r<s.z1){const dl=o.x+r-s.x0,dr=s.x1-(o.x-r),du=o.z+r-s.z0,dd=s.z1-(o.z-r);const m=Math.min(dl,dr,du,dd);
+  if(m===dl){o.x-=dl;hit={nx:-1,nz:0};}else if(m===dr){o.x+=dr;hit={nx:1,nz:0};}else if(m===du){o.z-=du;hit={nx:0,nz:-1};}else{o.z+=dd;hit={nx:0,nz:1};}}}
+  o.x=clamp(o.x,-W+r,W-r);o.z=clamp(o.z,-D+r,D-r);return hit;}
+const onSpill=(x,z)=>G.spills.some(s=>Math.hypot(x-s.x,z-s.z)<s.r);
+const cartFwd=c=>({x:-Math.sin(c.a),z:-Math.cos(c.a)});
+const toWorld=(c,lx,lz)=>{const ca=Math.cos(c.a),sa=Math.sin(c.a);return{x:c.x+lx*ca+lz*sa,z:c.z-lx*sa+lz*ca};};
+const handles=c=>K.players===1?[toWorld(c,0,1.25)]:[toWorld(c,-.45,1.25),toWorld(c,.45,1.25)];
+function putInCart(it,silent){it.st='cart';if(it.spot){it.spot.item=null;it.spot=null;}const c=G.cart;c.items.push(it);if(it.lab)it.lab.style.display='none';
+  if(!silent){K.sfx('drop',1+c.items.length*.05);if(c.items.length>=8)K.unlock('full');}}
+/* ================= päivitys ================= */
+const camT=new THREE.Vector3(),camP=new THREE.Vector3(0,20,16);
+let spinAcc=0;
+function update(dt,T){
+  const N=G.N,c=G.cart;
+  G.time-=dt;if(G.time<=0){endNight();return;}
+  // pelaajat
+  for(const p of G.pl){const I=K.inp[p.i];p.stun=Math.max(0,p.stun-dt);p.bubT-=dt;if(p.bubble&&p.bubT<=0){p.bubble.remove();p.bubble=null;}
+    if(I.sp){K.sfx(p.i?'shout2':'shout1');K.stat('shouts');say(p,['HEI!','HUP!','MUSTI!','VARO!','JEE!'][(Math.random()*5)|0]);
+      if(G.dog&&Math.hypot(G.dog.x-p.x,G.dog.z-p.z)<4.5&&G.dog.st!=='scared'){scareDog();}}
+    if(I.gp)grabAction(p);
+    if(p.hold!==null)continue;
+    const slip=onSpill(p.x,p.z),spd=(p.carry&&PROD[p.carry.k].heavy?3.2:4.6)*(p.stun>0?.3:1);
+    if(slip&&p.slipT<=0){p.slipT=1.2;K.stat('slips');K.sfx('slip');say(p,'LIUKAS!');p.o.userData.squash=1;}p.slipT-=dt;
+    const acc=slip?3:16;p.vx+=(I.x*spd-p.vx)*Math.min(1,acc*dt);p.vz+=(I.z*spd-p.vz)*Math.min(1,acc*dt);
+    p.x+=p.vx*dt;p.z+=p.vz*dt;pushOut(p,.38);
+    if(Math.hypot(I.x,I.z)>.1)p.face=Math.atan2(-p.vx,-p.vz);}
+  // pelaajat toisiaan vastaan
+  if(G.pl.length===2){const a=G.pl[0],b=G.pl[1],dx=b.x-a.x,dz=b.z-a.z,d=Math.hypot(dx,dz);if(d<.76&&d>0&&a.hold===null&&b.hold===null){const o=(.76-d)/2;a.x-=dx/d*o;a.z-=dz/d*o;b.x+=dx/d*o;b.z+=dz/d*o;}}
+  // kärry
+  const H=handles(c),slipC=onSpill(c.x,c.z);let fx=0,fz=0,tq=0;const holders=G.pl.filter(p=>p.hold!==null);
+  if(K.players===1&&holders.length){const I=K.inp[0],il=Math.hypot(I.x,I.z);if(il>.1){const want=Math.atan2(-I.x,-I.z);let d=want-c.a;while(d>Math.PI)d-=Math.PI*2;while(d<-Math.PI)d+=Math.PI*2;
+      c.w+=(clamp(d*4,-4.5,4.5)-c.w)*Math.min(1,dt*6);const f=cartFwd(c),pw=Math.max(0,Math.cos(d))*il*15;fx+=f.x*pw;fz+=f.z*pw;}}
+  else for(const p of holders){const I=K.inp[p.i],h=H[p.hold];const F={x:I.x*13,z:I.z*13};fx+=F.x;fz+=F.z;const rx=h.x-c.x,rz=h.z-c.z;tq+=(rz*F.x-rx*F.z)*.55;}
+  c.vx+=fx*dt;c.vz+=fz*dt;c.w+=tq*dt;
+  const f=cartFwd(c),vf=c.vx*f.x+c.vz*f.z,vs=c.vx*f.z-c.vz*f.x;// eteen- ja sivuttaisnopeus
+  const sideK=slipC?.6:9,fwdK=slipC?.25:1.6,load=1+c.items.reduce((a,i)=>a+(PROD[i.k].heavy?.25:.04),0);
+  const nvf=vf*Math.exp(-fwdK*dt/load),nvs=vs*Math.exp(-sideK*dt);c.vx=f.x*nvf+f.z*nvs;c.vz=f.z*nvf-f.x*nvs;c.w*=Math.exp(-(slipC?.6:3.2)*dt);
+  c.a+=c.w*dt;c.x+=c.vx*dt;c.z+=c.vz*dt;
+  const sp=Math.hypot(c.vx,c.vz);if(sp>7)K.unlock('rally');
+  if(Math.abs(c.w)>2){spinAcc+=Math.abs(c.w)*dt;if(spinAcc>Math.PI*4)K.unlock('spin');}else spinAcc=Math.max(0,spinAcc-dt*3);
+  // kärryn törmäys (kaksi ympyrää)
+  for(const lz of[-.55,.55]){const pt=toWorld(c,0,lz),o={x:pt.x,z:pt.z},hit=pushOut(o,.62);if(hit){const dx=o.x-pt.x,dz=o.z-pt.z;c.x+=dx;c.z+=dz;const vn=c.vx*hit.nx+c.vz*hit.nz;
+      if(vn<0){c.vx-=1.4*vn*hit.nx;c.vz-=1.4*vn*hit.nz;if(-vn>3.2)cartCrash(-vn);else if(-vn>1)K.sfx('bump');}}}
+  for(const can of G.cans){if(!can.down&&(Math.hypot(c.x-can.x,c.z-can.z)<1.1||G.pl.some(p=>Math.hypot(p.x-can.x,p.z-can.z)<.6&&Math.hypot(p.vx,p.vz)>2)))toppleCans(can);}
+  for(const cu of G.cust){const d=Math.hypot(c.x-cu.x,c.z-cu.z);if(d<1.3&&d>0){const o=(1.3-d);cu.x+=(cu.x-c.x)/d*o;cu.z+=(cu.z-c.z)/d*o;c.vx*=.85;c.vz*=.85;}}
+  // pitäjien paikka kahvassa
+  const H2=handles(c);for(const p of holders){const h=H2[p.hold],fb=toWorld(c,K.players===1?0:(p.hold?.45:-.45),1.6);p.x=fb.x;p.z=fb.z;p.vx=c.vx;p.vz=c.vz;p.face=c.a;}
+  // pelaaja vs kärry
+  for(const p of G.pl){if(p.hold!==null)continue;for(const lz of[-.55,.55]){const pt=toWorld(c,0,lz),dx=p.x-pt.x,dz=p.z-pt.z,d=Math.hypot(dx,dz);if(d<1&&d>0){p.x+=dx/d*(1-d);p.z+=dz/d*(1-d);}}}
+  // kassa
+  if(c.x>KASSA.x0&&c.x<KASSA.x1&&c.z>KASSA.z0&&c.z<KASSA.z1&&c.items.length&&!G.delivering.length){G.delivering=c.items.splice(0);G.delT=0;G.checkSum=0;}
+  if(G.delivering.length){G.delT-=dt;if(G.delT<=0){G.delT=.22;const it=G.delivering.shift();const P=PROD[it.k];const dbl=G.list.includes(it.k)&&!G.listDone.includes(it.k);const v=P.v*(dbl?2:1);
+      G.money+=v;G.checkSum+=v;K.stat('items');K.stat('money',v);if(dbl){G.listDone.push(it.k);K.stat('list');drawList();if(G.listDone.length>=G.list.length){G.money+=10;K.msg('MUMMON LISTA VALMIS! +€10');newList();drawList();}}
+      if(it.k==='munat')K.stat('eggs');if(it.k==='meloni')K.stat('melons');if(G.time<3)K.unlock('late');
+      K.sfx('coin');floatText('+€'+v+(dbl?' ×2':''),it.o.position);scene.remove(it.o);if(it.lab)it.lab.remove();G.items.splice(G.items.indexOf(it),1);
+      if(!G.delivering.length){if(G.checkSum>=60)K.unlock('big');}
+      setTimeout(()=>{if(G&&G.items.filter(i=>i.st==='shelf').length<G.N.items*.7)for(let q=0;q<2;q++)spawnItem();},600);}}
+  if(!G.goalHit&&G.money>=N.goal){G.goalHit=true;K.msg('TAVOITE SAAVUTETTU!');K.sfx('win');if(G.time>60)K.unlock('early');}
+  // tuotteet
+  for(const it of G.items){if(it.st==='air'){it.vy-=14*dt;it.x+=it.vx*dt;it.z+=it.vz*dt;it.y+=it.vy*dt;it.o.rotation.x+=dt*8;
+      const lc=toLocal(c,it.x,it.z);if(it.y<1&&Math.abs(lc.x)<.6&&Math.abs(lc.z)<.9&&it.vy<0){putInCart(it);K.stat('throws');const dd=Math.hypot(it.x-it.sx,it.z-it.sz);if(dd>4)K.unlock('throw');say(it.by,'KORIIN!');continue;}
+      if(it.y<=.05){it.y=.05;it.st='floor';it.o.rotation.x=0;K.sfx('drop',.7);if(PROD[it.k].fragile){breakEggs(it);continue;}}
+      const o={x:it.x,z:it.z};if(pushOut(o,.15)){it.x=o.x;it.z=o.z;it.vx*=-.3;it.vz*=-.3;}}
+    if(it.st==='carry'){const p=it.by;it.x=p.x;it.z=p.z;it.y=1.15;}
+    if(it.st==='dog'&&G.dog){it.x=G.dog.x-Math.sin(G.dog.face)*.7;it.z=G.dog.z-Math.cos(G.dog.face)*.7;it.y=.55;}
+    if(it.st!=='cart')it.o.position.set(it.x,it.y,it.z);}
+  // kärryn tavarat
+  c.items.forEach((it,i)=>{const lx=((i%2)-.5)*.5,lz=-.55+Math.floor(i/2)*.36,pt=toWorld(c,lx,lz);it.o.position.set(pt.x,.46+Math.floor(i/8)*.25,pt.z);it.o.rotation.set(0,c.a,0);it.x=pt.x;it.z=pt.z;});
+  updateDog(dt);updateCust(dt);updateCans(dt);
+  K.hudSet({time:G.time,money:G.money,goal:N.goal});
+  if(G.time<10&&Math.ceil(G.time)!==Math.ceil(G.time+dt))K.sfx('tick');}
+const toLocal=(c,x,z)=>{const dx=x-c.x,dz=z-c.z,ca=Math.cos(c.a),sa=Math.sin(c.a);return{x:dx*ca-dz*sa,z:dx*sa+dz*ca};};
+function grabAction(p){const c=G.cart;
+  if(p.hold!==null){p.hold=null;K.sfx('drop');return;}
+  if(p.carry){const it=p.carry,lc=toLocal(c,p.x,p.z);const near=Math.hypot(lc.x,lc.z)<2;
+    if(near){p.carry=null;it.by=null;putInCart(it);return;}
+    // heitto
+    p.carry=null;it.st='air';it.x=p.x;it.z=p.z;it.sx=p.x;it.sz=p.z;const fx=-Math.sin(p.face),fz=-Math.cos(p.face);it.vx=fx*6.5;it.vz=fz*6.5;it.vy=4.2;it.y=1.2;K.sfx('grab',.8);return;}
+  // koira?
+  if(G.dog&&Math.hypot(G.dog.x-p.x,G.dog.z-p.z)<1.2){const d=G.dog;K.stat('dogcatch');K.sfx('bark');say(p,'KIINNI!');if(d.item){const it=d.item;d.item=null;it.st='carry';it.by=p;p.carry=it;}d.st='dizzy';d.dizzy=3;return;}
+  // kahva
+  const H=handles(c);let best=-1,bd=1.2;H.forEach((h,i)=>{const d=Math.hypot(h.x-p.x,h.z-p.z);if(d<bd&&!G.pl.some(q=>q!==p&&q.hold===i)){bd=d;best=i;}});
+  if(best>=0){p.hold=best;K.sfx('grab');return;}
+  // tuote
+  let bi=null,bdd=1.5;for(const it of G.items){if(it.st!=='shelf'&&it.st!=='floor')continue;const d=Math.hypot(it.x-p.x,it.z-p.z);if(d<bdd){bdd=d;bi=it;}}
+  if(bi){if(bi.spot){bi.spot.item=null;bi.spot=null;}bi.st='carry';bi.by=p;p.carry=bi;K.sfx('grab');}}
+function cartCrash(v){const c=G.cart;G.crashes++;K.sfx('crash');shake=.4;if(c.items.length&&v>4.2){const n=Math.min(c.items.length,1+((Math.random()*2)|0));for(let i=0;i<n;i++){const it=c.items.splice((Math.random()*c.items.length)|0,1)[0];it.st='air';it.sx=it.x;it.sz=it.z;it.vx=(Math.random()-.5)*5;it.vz=(Math.random()-.5)*5;it.vy=4;it.y=.8;if(it.lab)it.lab.style.display='';}K.msg('TAVARAT LENSIVÄT!',1.4);}}
+function breakEggs(it){K.stat('broken');K.sfx('crash');floatText('PLÄTS!',it.o.position);removeItem(it);setTimeout(()=>{if(G)spawnItem();},2000);}
+function toppleCans(can){can.down=true;K.stat('cans');K.sfx('crash');G.money=Math.max(0,G.money-5);floatText('-€5 siivous',can.g.position);
+  const im=can.g.children[0];const mm=new THREE.Matrix4();for(let i=0;i<15;i++){can.parts.push({x:(Math.random()-.5)*.6,y:.1+Math.random()*1,z:(Math.random()-.5)*.6,vx:(Math.random()-.5)*5,vy:2+Math.random()*3,vz:(Math.random()-.5)*5,r:Math.random()*6});}}
+function updateCans(dt){for(const can of G.cans){if(!can.down||!can.parts.length)continue;const im=can.g.children[0],mm=new THREE.Matrix4(),q=new THREE.Quaternion(),e=new THREE.Euler();
+  can.parts.forEach((p,i)=>{if(p.y>.09||p.vy>0){p.vy-=12*dt;p.x+=p.vx*dt;p.z+=p.vz*dt;p.y+=p.vy*dt;p.r+=dt*6;if(p.y<.09){p.y=.09;p.vy=0;p.vx*=.3;p.vz*=.3;}}
+    e.set(Math.PI/2,p.r,0);q.setFromEuler(e);mm.compose(new THREE.Vector3(p.x,p.y,p.z),q,new THREE.Vector3(1,1,1));im.setMatrixAt(i,mm);});im.instanceMatrix.needsUpdate=true;}}
+function scareDog(){const d=G.dog;K.stat('shoo');K.sfx('bark');if(d.item){const it=d.item;d.item=null;it.st='air';it.sx=it.x;it.sz=it.z;it.vx=0;it.vz=0;it.vy=2;it.y=.6;}d.st='scared';d.t=4;}
+function updateDog(dt){const d=G.dog;if(!d)return;const c=G.cart;d.t-=dt;let tx=d.tx,tz=d.tz,spd=d.spd;
+  if(d.st==='dizzy'){d.dizzy-=dt;spd=0;d.o.rotation.y+=dt*8;if(d.dizzy<=0){d.st='wander';d.t=3;}}
+  else if(d.st==='wander'){if(d.t<=0){d.t=2+Math.random()*3;const p=randFree();d.tx=p.x;d.tz=p.z;}spd*=.45;
+    const guard=G.pl.some(p=>Math.hypot(p.x-c.x,p.z-c.z)<2.6);if(c.items.length&&!guard&&Math.random()<dt*.5)d.st='steal';}
+  else if(d.st==='steal'){tx=c.x;tz=c.z;if(Math.hypot(d.x-c.x,d.z-c.z)<1.2&&c.items.length){const it=c.items.splice((Math.random()*c.items.length)|0,1)[0];it.st='dog';d.item=it;if(it.lab)it.lab.style.display='';d.st='flee';d.t=7;K.sfx('bark');K.msg('MUSTI VEI '+PROD[it.k].n.toUpperCase()+'!',1.6);const p=farFrom(c.x,c.z);d.tx=p.x;d.tz=p.z;}
+    if(!c.items.length)d.st='wander';}
+  else if(d.st==='flee'){spd*=1.05;if(d.t<=0||Math.hypot(d.x-d.tx,d.z-d.tz)<1){if(d.item){const it=d.item;d.item=null;it.st='floor';it.y=.05;}d.st='wander';d.t=3;}}
+  else if(d.st==='scared'){const p=G.pl.reduce((a,b)=>Math.hypot(b.x-d.x,b.z-d.z)<Math.hypot(a.x-d.x,a.z-d.z)?b:a,G.pl[0]);tx=d.x+(d.x-p.x)*3;tz=d.z+(d.z-p.z)*3;spd*=1.1;if(d.t<=0){d.st='wander';d.t=2;}}
+  if(d.st!=='dizzy'){const dx=tx-d.x,dz=tz-d.z,l=Math.hypot(dx,dz);if(l>.3){d.vx+=(dx/l*spd-d.vx)*Math.min(1,dt*6);d.vz+=(dz/l*spd-d.vz)*Math.min(1,dt*6);}else{d.vx*=.9;d.vz*=.9;}
+    d.x+=d.vx*dt;d.z+=d.vz*dt;const h=pushOut(d,.4);if(h&&d.st==='wander')d.t=0;const v=Math.hypot(d.vx,d.vz);if(v>.2)d.face=Math.atan2(-d.vx,-d.vz);d.o.rotation.y=d.face;
+    const k=Math.min(1,v/3);d.legs.forEach((L,i)=>L.rotation.x=Math.sin(performance.now()/60+(i%2?Math.PI:0))*.7*k);d.tail.rotation.z=Math.sin(performance.now()/70)*.6;}
+  d.o.position.set(d.x,0,d.z);K.place(d.lab,d.o.position,1.1);}
+function randFree(){for(let t=0;t<40;t++){const x=lerp(-W+2,W-2,Math.random()),z=lerp(-D+2,D-2,Math.random());if(!hitSolid(x,z,.6))return{x,z};}return{x:0,z:5};}
+function farFrom(x,z){let best=null,bd=0;for(let t=0;t<20;t++){const p=randFree(),d=Math.hypot(p.x-x,p.z-z);if(d>bd){bd=d;best=p;}}return best;}
+function updateCust(dt){for(const c of G.cust){c.t-=dt;if(c.t<=0){c.t=3+Math.random()*4;const p=randFree();c.tx=p.x;c.tz=p.z;}const dx=c.tx-c.x,dz=c.tz-c.z,l=Math.hypot(dx,dz);
+  if(l>.4){c.vx=dx/l*1.1;c.vz=dz/l*1.1;}else{c.vx=c.vz=0;}c.x+=c.vx*dt;c.z+=c.vz*dt;pushOut(c,.4);for(const p of G.pl){const ex=p.x-c.x,ez=p.z-c.z,e=Math.hypot(ex,ez);if(e<.8&&e>0&&p.hold===null){p.x+=ex/e*(.8-e);p.z+=ez/e*(.8-e);}}
+  if(l>.4)c.face=Math.atan2(-c.vx,-c.vz);c.o.position.set(c.x,0,c.z);c.o.rotation.y=c.face;CK.animBlob(c.o,dt,Math.hypot(c.vx,c.vz),false);}}
+function say(p,t){if(!p)return;if(p.bubble)p.bubble.remove();p.bubble=K.label(t,'ckbubble');p.bubT=1.1;}
+const floats=[];function floatText(t,pos){const el=K.label(t,'cklabel');el.style.color='#8df0a0';floats.push({el,p:pos.clone(),t:1.2});}
+function endNight(){const N=G.N,m=Math.round(G.money);const stars=m>=N.goal*1.6?3:m>=N.goal*1.3?2:m>=N.goal?1:0;
+  if(stars>0){K.unlock('n'+(G.n+1));if(K.players===1)K.unlock('solo');if(G.crashes===0)K.unlock('careful');if(stars===3)K.unlock('star3');}
+  const pass=stars>0;const rows=[['Kassassa','€'+m],['Tavoite','€'+N.goal],['Törmäyksiä',String(G.crashes)],['Mummon listalta',String(G.listDone.length)]];
+  K.results({title:pass?'Vuoro tehty!':'Kauppa sulkeutui…',stars,score:m,rows,text:pass?'Kauppias Ruusu on tyytyväinen. Melkein.':'Tavoite jäi saavuttamatta. Yritetään uudelleen!'});
+  const allStars=NIGHTS.every((_,i)=>K.data.best[i]&&K.data.best[i].stars===3);if(allStars)K.unlock('starall');clearLevel();}
+/* ================= kamera ja piirto ================= */
+let shake=0;
+K.loop((dt,rdt,T)=>{
+  if(G&&K.state==='play')update(dt,T);
+  // animaatiot ja kyltit
+  if(G){for(const p of G.pl){p.o.position.set(p.x,0,p.z);p.o.rotation.y=p.face;CK.animBlob(p.o,rdt*(K.state==='play'?1:0),Math.hypot(p.vx,p.vz),!!p.carry);K.place(p.lab,p.o.position,1.7);if(p.bubble)K.place(p.bubble,p.o.position,2.3);}
+    const c=G.cart;c.o.position.set(c.x,0,c.z);c.o.rotation.y=c.a;c.wheels.forEach(w=>w.rotation.x+=Math.hypot(c.vx,c.vz)*dt*6);
+    for(const it of G.items)if(it.lab&&it.st!=='cart'){const want=G.list.includes(it.k)&&!G.listDone.includes(it.k);it.lab.classList.toggle('want',want);K.place(it.lab,it.o.position,.7);if(it.st==='carry'||(!want&&!G.pl.some(p=>Math.hypot(p.x-it.x,p.z-it.z)<7)))it.lab.style.display='none';}
+    for(let i=floats.length-1;i>=0;i--){const f=floats[i];f.t-=rdt;f.p.y+=rdt*1.2;K.place(f.el,f.p,0);f.el.style.opacity=Math.min(1,f.t*2);if(f.t<=0){f.el.remove();floats.splice(i,1);}}
+    let mx=0,mz=0;G.pl.forEach(p=>{mx+=p.x;mz+=p.z;});mx=(mx+c.x)/(G.pl.length+1);mz=(mz+c.z)/(G.pl.length+1);camT.x=lerp(camT.x,clamp(mx,-W+7,W-7),Math.min(1,rdt*3));camT.z=lerp(camT.z,clamp(mz,-D+4,D-3.5),Math.min(1,rdt*3));}
+  else{camT.x=Math.sin(T*.08)*6;camT.z=Math.cos(T*.1)*2;}
+  shake=Math.max(0,shake-rdt);const sx=(Math.random()-.5)*shake*.6,sz=(Math.random()-.5)*shake*.6;
+  camera.position.set(camT.x+sx,G?13.5:22,camT.z+(G?9.5:13)+sz);camera.lookAt(camT.x,0,camT.z-.6);
+});
+K.menu();
+</script>
+</body></html>
